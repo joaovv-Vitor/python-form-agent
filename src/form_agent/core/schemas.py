@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, TypeAlias
+from typing import Any
 
-JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
-JsonObject: TypeAlias = dict[str, JsonValue]
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+type JsonObject = dict[str, JsonValue]
 
 
 @dataclass(frozen=True, slots=True)

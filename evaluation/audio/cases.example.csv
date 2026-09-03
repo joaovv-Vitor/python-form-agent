@@ -1,0 +1,3 @@
+case_id,audio_file,reference_text
+joao_01,audios/joao_01.wav,"Meu nome é João Vitor..."
+maria_01,audios/maria_01.wav,"Meu nome é Maria..."
