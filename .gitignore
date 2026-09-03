@@ -13,11 +13,34 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+pip-wheel-metadata/
+
+# Virtualenv and tooling state
+.python-version
+.tox/
+.nox/
+.hypothesis/
+.cache/
 
 # Tests and coverage
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+
+# Logs and local data
+*.log
+*.sqlite3
+*.db
+*.tmp
+*.temp
 
 # Generated reports
 reports/
