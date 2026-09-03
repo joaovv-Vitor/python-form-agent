@@ -15,15 +15,15 @@ from openai import (
     OpenAIError,
 )
 
-from .config import ModelConfig
-from .errors import (
+from ..config import ModelConfig
+from ..core.errors import (
     ModelAuthenticationError,
     ModelCommunicationError,
     ModelResponseError,
     ModelTimeoutError,
 )
-from .interfaces import ModelSession
-from .schemas import FormInspection, ToolCall, ToolCompletion, ToolDefinition
+from ..core.interfaces import ModelSession
+from ..core.schemas import FormInspection, ToolCall, ToolCompletion, ToolDefinition
 
 SYSTEM_PROMPT = """Você é um agente de preenchimento de formulários web.
 Use somente as tools fornecidas. Baseie-se no inventário do formulário. Não invente correspondências.

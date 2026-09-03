@@ -4,10 +4,10 @@ import httpx
 import pytest
 from openai import AuthenticationError
 
-from python_poc.config import ModelConfig
-from python_poc.errors import ModelAuthenticationError, ModelResponseError
-from python_poc.model import OpenAIModelSession
-from python_poc.schemas import FormInspection, ToolDefinition
+from form_agent.adapters.openai_model import OpenAIModelSession
+from form_agent.config import ModelConfig
+from form_agent.core.errors import ModelAuthenticationError, ModelResponseError
+from form_agent.core.schemas import FormInspection, ToolDefinition
 
 
 def session_with(completions):

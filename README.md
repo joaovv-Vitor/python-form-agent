@@ -80,27 +80,31 @@ ruff check .
 ruff format --check .
 
 # Análise de tipos
-mypy python_poc
+mypy src/form_agent
 ```
 
 ## Estrutura
 
 ```text
-python_poc/
-├── agent.py              # Orquestra modelo e tools
-├── browser.py            # Automação Playwright
-├── cli.py                # Interface interativa e tratamento de erros
-├── config.py             # Leitura e validação das configurações
-├── errors.py             # Exceções da aplicação
-├── evaluation.py         # Runner da avaliação
-├── evaluation_cases.py   # Leitura dos casos CSV
-├── interfaces.py         # Contratos entre componentes
-├── mcp_client.py         # Cliente MCP por stdio
-├── mcp_server.py         # Tools MCP do navegador
-├── metrics.py            # Cálculo das métricas
-├── model.py              # Adaptador OpenAI-compatible
-├── reporting.py          # Relatórios CSV e HTML
-└── schemas.py            # Objetos tipados compartilhados
+src/form_agent/
+├── core/                 # Domínio: agente, contratos, schemas e erros
+├── adapters/             # Integrações OpenAI, MCP e Playwright
+├── mcp/server.py         # Tools MCP do navegador
+├── evaluation/           # Runner, casos, métricas e relatórios
+├── bootstrap.py          # Composição das dependências da aplicação
+├── cli.py                # Interface interativa
+└── config.py             # Leitura e validação das configurações
+tests/
+├── unit/                 # Testes rápidos, sem navegador real
+└── integration/          # Testes MCP + Playwright
+examples/test-form/       # Formulário local usado por padrão
 ```
+
+## Arquitetura
+
+- `core` contém regras de negócio, contratos e tipos compartilhados; não depende de OpenAI, MCP ou Playwright.
+- `adapters` implementa as integrações externas usadas pelos contratos do núcleo.
+- `bootstrap.py` monta as dependências comuns à CLI e à avaliação.
+- `mcp` e `cli.py` são interfaces de entrada; `evaluation` é um fluxo independente de execução e relatórios.
 
 Erros esperados de configuração, autenticação, conexão e timeout são apresentados de forma amigável. Use `LOG_LEVEL=INFO` ou `LOG_LEVEL=DEBUG` quando precisar investigar uma falha inesperada.

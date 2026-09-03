@@ -11,9 +11,9 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from .errors import ConfigurationError
+from .core.errors import ConfigurationError
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 DEFAULT_PROFILES_FILE = PROJECT_ROOT / "model-profiles.json"
 API_KEY_PLACEHOLDERS = {
@@ -134,7 +134,7 @@ def load_model_config(
 
 def load_browser_config(*, env_file: Path | None = DEFAULT_ENV_FILE) -> BrowserConfig:
     _load_environment(env_file)
-    default_url = (PROJECT_ROOT / "test-form/index.html").as_uri()
+    default_url = (PROJECT_ROOT / "examples/test-form/index.html").as_uri()
     url = (os.getenv("FORM_URL") or default_url).strip()
     if not url:
         raise ConfigurationError("FORM_URL não pode ser vazio.")

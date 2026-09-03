@@ -1,9 +1,9 @@
 import pytest
 
-from python_poc.browser import BrowserController
-from python_poc.config import BrowserConfig
-from python_poc.errors import AmbiguousElementError, ElementNotFoundError
-from python_poc.schemas import FormField
+from form_agent.adapters.playwright_browser import BrowserController
+from form_agent.config import BrowserConfig
+from form_agent.core.errors import AmbiguousElementError, ElementNotFoundError
+from form_agent.core.schemas import FormField
 
 
 def controller():

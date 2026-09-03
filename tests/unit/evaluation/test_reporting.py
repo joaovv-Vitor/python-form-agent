@@ -1,5 +1,5 @@
-from python_poc.metrics import EvaluationMetrics, EvaluationRow
-from python_poc.reporting import write_reports
+from form_agent.evaluation.metrics import EvaluationMetrics, EvaluationRow
+from form_agent.evaluation.reporting import write_reports
 
 
 def test_writes_csv_and_html_reports(tmp_path):

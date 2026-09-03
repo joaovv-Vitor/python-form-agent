@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from python_poc.config import load_agent_max_turns, load_browser_config, load_model_config
-from python_poc.errors import ConfigurationError
+from form_agent.config import load_agent_max_turns, load_browser_config, load_model_config
+from form_agent.core.errors import ConfigurationError
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from .schemas import JsonObject
+from ..core.schemas import JsonObject
 
 FIELD_MAP = {
     "fullName": "Nome completo",

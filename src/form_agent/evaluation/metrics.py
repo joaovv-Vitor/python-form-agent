@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .schemas import JsonObject
+from ..core.schemas import JsonObject
 
 
 @dataclass(frozen=True, slots=True)

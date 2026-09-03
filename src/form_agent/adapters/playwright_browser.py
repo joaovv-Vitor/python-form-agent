@@ -6,9 +6,9 @@ from collections.abc import Sequence
 
 from playwright.async_api import Browser, Locator, Page, Playwright, async_playwright
 
-from .config import BrowserConfig, load_browser_config
-from .errors import AmbiguousElementError, BrowserControllerError, ElementNotFoundError
-from .schemas import FormButton, FormField, FormInspection, JsonObject
+from ..config import BrowserConfig, load_browser_config
+from ..core.errors import AmbiguousElementError, BrowserControllerError, ElementNotFoundError
+from ..core.schemas import FormButton, FormField, FormInspection, JsonObject
 
 FIELD_INSPECTION_SCRIPT = """els => els.map(control => {
   const labels = control.labels

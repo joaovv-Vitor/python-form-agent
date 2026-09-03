@@ -1,11 +1,11 @@
 import pytest
 
-from python_poc.mcp_client import BrowserToolsClient
+from form_agent.adapters.mcp_client import BrowserToolsClient
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_python_mcp_playwright_roundtrip(monkeypatch: pytest.MonkeyPatch):
+async def test_mcp_playwright_roundtrip(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("HEADLESS", "true")
     client = BrowserToolsClient()
     try:

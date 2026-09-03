@@ -2,8 +2,8 @@ from collections.abc import Sequence
 
 import pytest
 
-from python_poc.agent import FormAgent
-from python_poc.schemas import (
+from form_agent.core.agent import FormAgent, submission_requested
+from form_agent.core.schemas import (
     FormField,
     FormInspection,
     JsonObject,
@@ -11,6 +11,12 @@ from python_poc.schemas import (
     ToolCompletion,
     ToolDefinition,
 )
+
+
+def test_submission_guard():
+    assert submission_requested("Envie o formulário")
+    assert not submission_requested("Não envie o formulário")
+    assert not submission_requested("Não quero que você envie o formulário")
 
 
 class FakeTools:

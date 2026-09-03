@@ -4,11 +4,8 @@ import asyncio
 import logging
 import os
 
-from .agent import FormAgent
-from .config import load_agent_max_turns, load_model_config
-from .errors import ConfigurationError, FormAgentError
-from .mcp_client import BrowserToolsClient
-from .model import OpenAICompatibleModel
+from .bootstrap import create_application
+from .core.errors import ConfigurationError, FormAgentError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,17 +20,15 @@ def configure_logging() -> None:
 async def run_cli() -> None:
     configure_logging()
     try:
-        config = load_model_config()
-        max_turns = load_agent_max_turns()
+        application = create_application()
     except ConfigurationError as exc:
         print(f"Erro de configuração: {exc}")
         return
 
-    client = BrowserToolsClient()
-    model = OpenAICompatibleModel(config)
-    agent = FormAgent(client, model, max_turns=max_turns)
     print(
-        f"Form Agent Python — perfil {config.profile}, modelo {config.model}. Digite uma instrução ou 'sair'."
+        "Form Agent Python — "
+        f"perfil {application.config.profile}, modelo {application.config.model}. "
+        "Digite uma instrução ou 'sair'."
     )
     try:
         while True:
@@ -45,7 +40,7 @@ async def run_cli() -> None:
                 break
             if instruction:
                 try:
-                    result = await agent.run(instruction)
+                    result = await application.agent.run(instruction)
                 except FormAgentError as exc:
                     print(f"Agente> Não foi possível concluir a solicitação: {exc}")
                 except Exception:
@@ -56,7 +51,7 @@ async def run_cli() -> None:
                 else:
                     print(f"Agente> {result.message}")
     finally:
-        await asyncio.gather(client.close(), model.close(), return_exceptions=True)
+        await application.close()
 
 
 def main() -> None:

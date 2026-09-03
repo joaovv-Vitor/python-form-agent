@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
 
-from .browser import BrowserController
-from .schemas import JsonObject
+from ..adapters.playwright_browser import BrowserController
+from ..core.schemas import JsonObject
 
 logging.getLogger("mcp").setLevel(logging.WARNING)
 

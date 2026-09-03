@@ -11,9 +11,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
-from .config import PROJECT_ROOT
-from .errors import ToolClientError
-from .schemas import FormInspection, JsonObject, ToolDefinition
+from ..config import PROJECT_ROOT
+from ..core.errors import ToolClientError
+from ..core.schemas import FormInspection, JsonObject, ToolDefinition
 
 
 class BrowserToolsClient:
@@ -34,7 +34,7 @@ class BrowserToolsClient:
             stack = AsyncExitStack()
             params = StdioServerParameters(
                 command=sys.executable,
-                args=["-m", "python_poc.mcp_server"],
+                args=["-m", "form_agent.mcp.server"],
                 env=dict(os.environ),
                 cwd=PROJECT_ROOT,
             )

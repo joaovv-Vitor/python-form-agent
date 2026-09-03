@@ -25,15 +25,20 @@ dev = [
 ]
 
 [project.scripts]
-form-agent-py = "python_poc.cli:main"
-form-evaluate-py = "python_poc.evaluation:main"
+form-agent-py = "form_agent.cli:main"
+form-evaluate-py = "form_agent.evaluation.runner:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-include = ["python_poc*"]
+where = ["src"]
+include = ["form_agent*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["python_tests"]
+testpaths = ["tests"]
+pythonpath = ["src"]
 markers = ["integration: tests that launch the MCP server and a real browser"]
 
 [tool.ruff]
@@ -46,6 +51,7 @@ ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
+files = ["src/form_agent"]
 check_untyped_defs = true
 disallow_untyped_defs = true
 no_implicit_optional = true

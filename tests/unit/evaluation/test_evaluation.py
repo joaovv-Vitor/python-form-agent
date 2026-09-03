@@ -1,21 +1,16 @@
 import asyncio
-from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from python_poc.agent import submission_requested
-from python_poc.evaluation import _close_resources, calculate, load_cases
-from python_poc.metrics import EvaluationMetrics
-
-
-def test_submission_guard():
-    assert submission_requested("Envie o formulário")
-    assert not submission_requested("Não envie o formulário")
-    assert not submission_requested("Não quero que você envie o formulário")
+from form_agent.bootstrap import Application
+from form_agent.config import PROJECT_ROOT
+from form_agent.evaluation.cases import load_cases
+from form_agent.evaluation.metrics import EvaluationMetrics, calculate
 
 
 def test_csv_catalog():
-    cases = load_cases(Path(__file__).resolve().parents[1] / "evaluation/cases.csv")
+    cases = load_cases(PROJECT_ROOT / "evaluation/cases.csv")
     assert len(cases) >= 3
     assert {case.id for case in cases} >= {"joao_completo", "maria_envio", "vinicios_parcial"}
 
@@ -50,6 +45,12 @@ async def test_cleanup_continues_after_mcp_cancellation():
         async def close(self) -> None:
             closed.append("model")
 
-    await _close_resources(CancelledClient(), Model())
+    application = Application(
+        config=SimpleNamespace(),
+        agent=SimpleNamespace(),
+        client=CancelledClient(),
+        model=Model(),
+    )
+    await application.close()
 
     assert closed == ["model", "client"]
