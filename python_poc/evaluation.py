@@ -42,6 +42,20 @@ def _compare(case: EvaluationCase, actual: JsonObject) -> tuple[int, bool]:
     return correct, exact_fields
 
 
+async def _close_resources(client: BrowserToolsClient, model: OpenAICompatibleModel) -> None:
+    """Close evaluation resources without letting MCP shutdown mask the result."""
+    # The MCP stdio transport uses AnyIO cancel scopes while it shuts down.  Close
+    # it after the model and independently: a cancellation raised by one resource
+    # must not prevent the other one from being released.
+    for resource in (model, client):
+        try:
+            await resource.close()
+        except asyncio.CancelledError:
+            continue
+        except Exception:
+            continue
+
+
 async def _run_attempt(
     agent: FormAgent,
     case: EvaluationCase,
@@ -107,7 +121,7 @@ async def evaluate() -> tuple[EvaluationMetrics, tuple[Path, Path]]:
                 suffix = f" — {row.error}" if row.error else ""
                 print(f"{case.id} tentativa {attempt}/{attempts}: {status}{suffix}")
     finally:
-        await asyncio.gather(client.close(), model.close(), return_exceptions=True)
+        await _close_resources(client, model)
 
     metrics = calculate(rows)
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:-3]

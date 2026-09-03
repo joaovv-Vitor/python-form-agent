@@ -1,7 +1,10 @@
+import asyncio
 from pathlib import Path
 
+import pytest
+
 from python_poc.agent import submission_requested
-from python_poc.evaluation import calculate, load_cases
+from python_poc.evaluation import _close_resources, calculate, load_cases
 from python_poc.metrics import EvaluationMetrics
 
 
@@ -32,3 +35,21 @@ def test_metrics_multiple_attempts():
     assert metrics.overall_pass_rate == 0.5
     assert metrics.stable_case_rate == 0
     assert metrics.total_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_cleanup_continues_after_mcp_cancellation():
+    closed: list[str] = []
+
+    class CancelledClient:
+        async def close(self) -> None:
+            closed.append("client")
+            raise asyncio.CancelledError
+
+    class Model:
+        async def close(self) -> None:
+            closed.append("model")
+
+    await _close_resources(CancelledClient(), Model())
+
+    assert closed == ["model", "client"]
