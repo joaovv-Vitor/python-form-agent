@@ -1,86 +1,129 @@
+"""Run repeatable form-agent evaluations."""
+
 from __future__ import annotations
 
 import asyncio
-import csv
-import html
 import os
-import statistics
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from .agent import FormAgent
-from .config import load_model_config
+from .config import PROJECT_ROOT, load_agent_max_turns, load_model_config
+from .errors import ConfigurationError, FormAgentError
+from .evaluation_cases import EvaluationCase, load_cases
 from .mcp_client import BrowserToolsClient
+from .metrics import EvaluationMetrics, EvaluationRow, calculate
 from .model import OpenAICompatibleModel
+from .reporting import write_reports
+from .schemas import JsonObject
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-FIELD_MAP = {"fullName": "Nome completo", "email": "E-mail", "phone": "Telefone", "birthDate": "Data de nascimento", "city": "Cidade", "state": "Estado", "acceptTerms": "Aceito os termos"}
-
-
-def boolean(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"true", "sim", "1"}: return True
-    if normalized in {"false", "não", "nao", "0"}: return False
-    raise ValueError(f"Booleano inválido: {value}")
+# Backwards-compatible imports for users of the original single-file module.
+__all__ = ["calculate", "evaluate", "load_cases", "main", "write_reports"]
 
 
-def load_cases(path: Path) -> list[dict[str, Any]]:
-    with path.open(encoding="utf-8-sig", newline="") as file:
-        rows = list(csv.DictReader(file))
-    if not rows: raise ValueError("O CSV não contém casos")
-    ids, cases = set(), []
-    for line, row in enumerate(rows, 2):
-        if not row.get("id") or not row.get("instruction"): raise ValueError(f"id/instruction ausente na linha {line}")
-        if row["id"] in ids: raise ValueError(f"id duplicado: {row['id']}")
-        ids.add(row["id"])
-        expected = {}
-        for column, field in FIELD_MAP.items():
-            if row.get(column, "").strip(): expected[field] = boolean(row[column]) if column == "acceptTerms" else row[column].strip()
-        cases.append({"id": row["id"], "instruction": row["instruction"], "expected": expected, "submitted": boolean(row["submitted"]), "unmatched": boolean(row["unmatched"])})
-    return cases
+def _attempts_from_environment() -> int:
+    raw_value = os.getenv("EVALUATION_ATTEMPTS", "3")
+    try:
+        attempts = int(raw_value)
+    except ValueError as exc:
+        raise ConfigurationError("EVALUATION_ATTEMPTS deve ser um número inteiro.") from exc
+    if attempts <= 0:
+        raise ConfigurationError("EVALUATION_ATTEMPTS deve ser maior que zero.")
+    return attempts
 
 
-def calculate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    correct = sum(row["correct"] for row in rows); returned = sum(row["returned"] for row in rows); expected = sum(row["expected_count"] for row in rows)
-    precision = correct / returned if returned else 1.0; recall = correct / expected if expected else 1.0
-    latencies = sorted(row["latency_ms"] for row in rows); p95 = latencies[max(0, int(len(latencies) * .95 + .999) - 1)]
-    passed = lambda row: row["passed"]
-    groups = {row["id"] for row in rows}
-    stable = sum(all(passed(row) for row in rows if row["id"] == case_id) for case_id in groups)
-    return {"field_precision": precision, "field_recall": recall, "field_f1": 2*precision*recall/(precision+recall) if precision+recall else 0, "overall_pass_rate": sum(map(passed, rows))/len(rows), "stable_case_rate": stable/len(groups), "average_latency_ms": statistics.mean(latencies), "p95_latency_ms": p95, "unique_cases": len(groups), "total_attempts": len(rows)}
+def _compare(case: EvaluationCase, actual: JsonObject) -> tuple[int, bool]:
+    correct = sum(
+        str(actual.get(field_name)).casefold() == str(expected).casefold()
+        for field_name, expected in case.expected.items()
+    )
+    exact_fields = correct == len(case.expected) == len(actual)
+    return correct, exact_fields
 
 
-def write_reports(metrics: dict[str, Any], rows: list[dict[str, Any]], stamp: str) -> tuple[Path, Path]:
-    directory = PROJECT_ROOT / "reports"; directory.mkdir(exist_ok=True)
-    csv_path = directory / f"python-evaluation-report_{stamp}.csv"
-    html_path = directory / f"python-evaluation-report_{stamp}.html"
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.writer(file, delimiter=";"); writer.writerow(["Métrica", "Valor"])
-        writer.writerows(metrics.items()); writer.writerow([]); writer.writerow(rows[0].keys()); writer.writerows(row.values() for row in rows)
-    cards = "".join(f'<article><b>{html.escape(key)}</b><strong>{value:.4f}</strong></article>' if isinstance(value, float) else f'<article><b>{html.escape(key)}</b><strong>{value}</strong></article>' for key, value in metrics.items())
-    table_rows = "".join("<tr>" + "".join(f"<td>{html.escape(str(value))}</td>" for value in row.values()) + "</tr>" for row in rows)
-    html_path.write_text(f'''<!doctype html><meta charset="utf-8"><title>Métricas Python</title><style>body{{font:15px system-ui;background:#f3f6fb;padding:30px}}main{{max-width:1200px;margin:auto}}section{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}}article,table{{background:white;padding:16px;border-radius:10px}}strong{{display:block;font-size:24px;color:#155e75;margin-top:8px}}table{{margin-top:20px;border-collapse:collapse;width:100%}}td,th{{padding:8px;border-bottom:1px solid #ddd;text-align:left}}</style><main><h1>Avaliação da PoC Python</h1><section>{cards}</section><table><thead><tr>{''.join(f'<th>{html.escape(k)}</th>' for k in rows[0])}</tr></thead><tbody>{table_rows}</tbody></table></main>''', encoding="utf-8")
-    return html_path, csv_path
+async def _run_attempt(
+    agent: FormAgent,
+    case: EvaluationCase,
+    attempt: int,
+) -> EvaluationRow:
+    started = time.perf_counter()
+    try:
+        result = await agent.run(case.instruction)
+    except FormAgentError as exc:
+        return EvaluationRow(
+            id=case.id,
+            attempt=attempt,
+            passed=False,
+            instruction=case.instruction,
+            expected_data=case.expected,
+            returned_data={},
+            expected_count=len(case.expected),
+            returned=0,
+            correct=0,
+            submitted_correct=False,
+            unmatched_correct=False,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            error=str(exc),
+        )
+
+    actual: JsonObject = {item.field: item.value for item in result.filled}
+    correct, exact_fields = _compare(case, actual)
+    submitted_correct = result.submitted == case.submitted
+    unmatched_correct = result.unmatched == case.unmatched
+    return EvaluationRow(
+        id=case.id,
+        attempt=attempt,
+        passed=exact_fields and submitted_correct and unmatched_correct,
+        instruction=case.instruction,
+        expected_data=case.expected,
+        returned_data=actual,
+        expected_count=len(case.expected),
+        returned=len(actual),
+        correct=correct,
+        submitted_correct=submitted_correct,
+        unmatched_correct=unmatched_correct,
+        latency_ms=round((time.perf_counter() - started) * 1000),
+    )
 
 
-async def evaluate() -> None:
-    attempts = int(os.getenv("EVALUATION_ATTEMPTS", "3")); cases = load_cases(Path(os.getenv("EVALUATION_CASES_FILE", str(PROJECT_ROOT / "evaluation/cases.csv"))))
-    config = load_model_config(); client = BrowserToolsClient(); agent = FormAgent(client, OpenAICompatibleModel(config)); rows = []
+async def evaluate() -> tuple[EvaluationMetrics, tuple[Path, Path]]:
+    attempts = _attempts_from_environment()
+    cases_path = Path(
+        os.getenv("EVALUATION_CASES_FILE", str(PROJECT_ROOT / "evaluation/cases.csv"))
+    )
+    cases = load_cases(cases_path)
+    config = load_model_config()
+    client = BrowserToolsClient()
+    model = OpenAICompatibleModel(config)
+    agent = FormAgent(client, model, max_turns=load_agent_max_turns())
+    rows: list[EvaluationRow] = []
     try:
         for case in cases:
             for attempt in range(1, attempts + 1):
-                started = time.perf_counter(); result = await agent.run(case["instruction"]); actual = {item["field"]: item["value"] for item in result.filled}
-                correct = sum(str(actual.get(k)).lower() == str(v).lower() for k, v in case["expected"].items())
-                passed = correct == len(case["expected"]) == len(actual) and result.submitted == case["submitted"] and result.unmatched == case["unmatched"]
-                rows.append({"id": case["id"], "attempt": attempt, "passed": passed, "instruction": case["instruction"], "expected_data": case["expected"], "returned_data": actual, "expected_count": len(case["expected"]), "returned": len(actual), "correct": correct, "submitted_correct": result.submitted == case["submitted"], "unmatched_correct": result.unmatched == case["unmatched"], "latency_ms": round((time.perf_counter()-started)*1000)})
-                print(f"{case['id']} tentativa {attempt}/{attempts}: {'PASS' if passed else 'FAIL'}")
-    finally: await client.close()
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:-3]; paths = write_reports(calculate(rows), rows, stamp)
+                row = await _run_attempt(agent, case, attempt)
+                rows.append(row)
+                status = "PASS" if row.passed else "FAIL"
+                suffix = f" — {row.error}" if row.error else ""
+                print(f"{case.id} tentativa {attempt}/{attempts}: {status}{suffix}")
+    finally:
+        await asyncio.gather(client.close(), model.close(), return_exceptions=True)
+
+    metrics = calculate(rows)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:-3]
+    paths = write_reports(metrics, rows, stamp, PROJECT_ROOT / "reports")
     print(f"Relatório HTML: {paths[0]}\nPlanilha CSV: {paths[1]}")
+    return metrics, paths
 
 
-def main() -> None: asyncio.run(evaluate())
-if __name__ == "__main__": main()
+def main() -> None:
+    try:
+        asyncio.run(evaluate())
+    except (ConfigurationError, ValueError) as exc:
+        print(f"Erro de configuração da avaliação: {exc}")
+    except KeyboardInterrupt:
+        print("\nAvaliação encerrada.")
+
+
+if __name__ == "__main__":
+    main()

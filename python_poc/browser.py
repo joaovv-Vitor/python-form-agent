@@ -1,110 +1,203 @@
 from __future__ import annotations
 
-import os
+import json
 import unicodedata
-from pathlib import Path
-from typing import Any
+from collections.abc import Sequence
 
 from playwright.async_api import Browser, Locator, Page, Playwright, async_playwright
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from .config import BrowserConfig, load_browser_config
+from .errors import AmbiguousElementError, BrowserControllerError, ElementNotFoundError
+from .schemas import FormButton, FormField, FormInspection, JsonObject
+
+FIELD_INSPECTION_SCRIPT = """els => els.map(control => {
+  const labels = control.labels
+    ? [...control.labels].map(label => label.textContent?.trim()).filter(Boolean)
+    : [];
+  const tag = control.tagName.toLowerCase();
+  const type = tag === 'input' ? control.type : tag;
+  return {
+    label: labels[0] || control.getAttribute('aria-label') || control.placeholder || control.name || control.id || '(sem rótulo)',
+    name: control.name || null,
+    id: control.id || null,
+    type,
+    role: control.getAttribute('role') || (type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : tag === 'select' ? 'combobox' : 'textbox'),
+    placeholder: control.placeholder || null,
+    required: control.required,
+    disabled: control.disabled,
+    ...(tag === 'select' ? {options: [...control.options].map(option => ({label: option.text.trim(), value: option.value}))} : {})
+  };
+})"""
+
+BUTTON_INSPECTION_SCRIPT = """els => els.map(button => ({
+  label: button.getAttribute('aria-label') || button.textContent?.trim() || button.value || button.name || button.id || '(sem rótulo)',
+  name: button.name || null,
+  id: button.id || null,
+  type: button.type || 'button',
+  role: 'button',
+  disabled: button.disabled
+}))"""
 
 
 def normalize(value: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFD", value) if unicodedata.category(c) != "Mn").strip().lower()
+    return (
+        "".join(
+            character
+            for character in unicodedata.normalize("NFD", value)
+            if unicodedata.category(character) != "Mn"
+        )
+        .strip()
+        .lower()
+    )
 
 
 class BrowserController:
-    def __init__(self) -> None:
+    def __init__(self, config: BrowserConfig | None = None) -> None:
+        self.config = config or load_browser_config()
         self.playwright: Playwright | None = None
         self.browser: Browser | None = None
         self.page: Page | None = None
 
     async def start(self) -> Page:
-        if self.page:
+        if self.page is not None:
             return self.page
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=os.getenv("HEADLESS", "true").lower() != "false")
-        self.page = await self.browser.new_page()
-        url = os.getenv("FORM_URL") or (PROJECT_ROOT / "test-form/index.html").as_uri()
-        await self.page.goto(url)
-        return self.page
+        try:
+            self.playwright = await async_playwright().start()
+            if self.config.executable_path:
+                self.browser = await self.playwright.chromium.launch(
+                    headless=self.config.headless,
+                    executable_path=self.config.executable_path,
+                )
+            else:
+                self.browser = await self.playwright.chromium.launch(headless=self.config.headless)
+            self.page = await self.browser.new_page()
+            self.page.set_default_timeout(self.config.timeout_ms)
+            await self.page.goto(self.config.url, wait_until="domcontentloaded")
+            return self.page
+        except Exception as exc:
+            await self.close()
+            raise BrowserControllerError(
+                f"Não foi possível abrir o formulário em {self.config.url}."
+            ) from exc
 
     async def close(self) -> None:
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
-        self.browser = self.page = self.playwright = None
+        browser, playwright = self.browser, self.playwright
+        self.browser = None
+        self.page = None
+        self.playwright = None
+        try:
+            if browser is not None:
+                await browser.close()
+        finally:
+            if playwright is not None:
+                await playwright.stop()
 
-    async def inspect_form(self) -> dict[str, Any]:
+    async def inspect_form(self) -> FormInspection:
         page = await self.start()
-        fields = await page.locator("input, select, textarea").evaluate_all("""els => els.map(c => {
-          const labels = c.labels ? [...c.labels].map(x => x.textContent?.trim()).filter(Boolean) : [];
-          const tag = c.tagName.toLowerCase(); const type = tag === 'input' ? c.type : tag;
-          return {label: labels[0] || c.getAttribute('aria-label') || c.placeholder || c.name || c.id || '(sem rótulo)',
-            name: c.name || null, id: c.id || null, type,
-            role: c.getAttribute('role') || (type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : tag === 'select' ? 'combobox' : 'textbox'),
-            placeholder: c.placeholder || null, required: c.required, disabled: c.disabled,
-            ...(tag === 'select' ? {options: [...c.options].map(o => ({label:o.text.trim(), value:o.value}))} : {})};
-        })""")
-        buttons = await page.locator('button, input[type="submit"], input[type="button"]').evaluate_all("""els => els.map(b => ({
-          label: b.getAttribute('aria-label') || b.textContent?.trim() || b.value || b.name || b.id || '(sem rótulo)',
-          name:b.name || null, id:b.id || null, type:b.type || 'button', role:'button', disabled:b.disabled}))""")
-        return {"url": page.url, "fields": fields, "buttons": buttons}
+        raw_fields = await page.locator("input, select, textarea").evaluate_all(
+            FIELD_INSPECTION_SCRIPT
+        )
+        raw_buttons = await page.locator(
+            'button, input[type="submit"], input[type="button"]'
+        ).evaluate_all(BUTTON_INSPECTION_SCRIPT)
+        return FormInspection.from_mapping(
+            {"url": page.url, "fields": raw_fields, "buttons": raw_buttons}
+        )
 
     @staticmethod
-    def _best(query: str, elements: list[dict[str, Any]]) -> dict[str, Any]:
+    def _best(
+        query: str,
+        elements: Sequence[FormField | FormButton],
+    ) -> FormField | FormButton:
         wanted = normalize(query)
-        scored = []
+        if not wanted:
+            raise ElementNotFoundError("A referência ao elemento não pode ser vazia.")
+        scored: list[tuple[int, FormField | FormButton]] = []
         for element in elements:
-            values = [normalize(str(element[k])) for k in ("label", "name", "id", "placeholder") if element.get(k)]
-            score = 3 if wanted in values else 1 if any(wanted in value or value in wanted for value in values) else 0
+            values = [
+                normalize(value)
+                for value in (
+                    element.label,
+                    element.name,
+                    element.id,
+                    getattr(element, "placeholder", None),
+                )
+                if value
+            ]
+            score = (
+                3
+                if wanted in values
+                else 1
+                if any(wanted in value or value in wanted for value in values)
+                else 0
+            )
             if score:
                 scored.append((score, element))
         scored.sort(key=lambda item: item[0], reverse=True)
         if not scored:
-            raise ValueError(f"Elemento não encontrado semanticamente: {query}")
+            raise ElementNotFoundError(f"Elemento não encontrado semanticamente: {query}")
         if len(scored) > 1 and scored[0][0] == scored[1][0]:
-            raise ValueError(f"Referência ambígua: {query}")
+            raise AmbiguousElementError(f"Referência ambígua: {query}")
         return scored[0][1]
 
-    async def _field(self, field: str) -> tuple[dict[str, Any], Locator]:
+    async def _field(self, field: str) -> tuple[FormField, Locator]:
         inspection = await self.inspect_form()
-        meta = self._best(field, inspection["fields"])
+        meta = self._best(field, inspection.fields)
+        if not isinstance(meta, FormField):
+            raise ElementNotFoundError(f"Campo não encontrado: {field}")
+        if meta.disabled:
+            raise BrowserControllerError(f"O campo está desabilitado: {meta.label}")
         page = await self.start()
-        locator = page.get_by_label(meta["label"], exact=True)
-        if await locator.count() != 1 and meta.get("name"):
-            locator = page.locator(f'[name="{meta["name"]}"]')
-        if await locator.count() != 1 and meta.get("id"):
-            locator = page.locator(f'[id="{meta["id"]}"]')
+        locator = page.get_by_label(meta.label, exact=True)
+        if await locator.count() != 1 and meta.name:
+            locator = page.locator(f"[name={json.dumps(meta.name)}]")
+        if await locator.count() != 1 and meta.id:
+            locator = page.locator(f"[id={json.dumps(meta.id)}]")
         if await locator.count() != 1:
-            raise ValueError(f"Campo não localizado unicamente: {field}")
+            raise AmbiguousElementError(f"Campo não localizado unicamente: {field}")
         return meta, locator
 
-    async def fill_field(self, field: str, value: str) -> dict[str, Any]:
+    async def fill_field(self, field: str, value: str) -> JsonObject:
         meta, locator = await self._field(field)
-        if meta["type"] in ("checkbox", "radio"):
+        if meta.type in ("checkbox", "radio"):
             checked = normalize(value) in ("true", "sim", "yes", "1", "aceito", "marcar")
             await locator.set_checked(checked)
-        elif meta["type"] == "select":
-            try:
-                await locator.select_option(label=value)
-            except Exception:
-                await locator.select_option(value=value)
+        elif meta.type == "select":
+            wanted = normalize(value)
+            option = next(
+                (
+                    item
+                    for item in meta.options
+                    if wanted in {normalize(item.label), normalize(item.value)}
+                ),
+                None,
+            )
+            if option is None:
+                raise ElementNotFoundError(f"Opção não encontrada em {meta.label}: {value}")
+            await locator.select_option(value=option.value)
         else:
             await locator.fill(value)
-        return {"success": True, "field": meta["label"], "value": value}
+        return {"success": True, "field": meta.label, "value": value}
 
-    async def read_field(self, field: str) -> dict[str, Any]:
+    async def read_field(self, field: str) -> JsonObject:
         meta, locator = await self._field(field)
-        value = await locator.is_checked() if meta["type"] in ("checkbox", "radio") else await locator.input_value()
-        return {"success": True, "field": meta["label"], "value": value}
+        value = (
+            await locator.is_checked()
+            if meta.type in ("checkbox", "radio")
+            else await locator.input_value()
+        )
+        return {"success": True, "field": meta.label, "value": value}
 
-    async def click_button(self, button: str) -> dict[str, Any]:
+    async def click_button(self, button: str) -> JsonObject:
         inspection = await self.inspect_form()
-        meta = self._best(button, inspection["buttons"])
+        meta = self._best(button, inspection.buttons)
+        if not isinstance(meta, FormButton):
+            raise ElementNotFoundError(f"Botão não encontrado: {button}")
+        if meta.disabled:
+            raise BrowserControllerError(f"O botão está desabilitado: {meta.label}")
         page = await self.start()
-        locator = page.get_by_role("button", name=meta["label"], exact=True)
+        locator = page.get_by_role("button", name=meta.label, exact=True)
+        if await locator.count() != 1:
+            raise AmbiguousElementError(f"Botão não localizado unicamente: {button}")
         await locator.click()
-        return {"success": True, "button": meta["label"]}
+        return {"success": True, "button": meta.label}
