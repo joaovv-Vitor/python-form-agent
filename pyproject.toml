@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "form-agent-poc-python"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=1.27,<2",
+  "openai>=1.99,<3",
+  "playwright>=1.58,<2",
+  "python-dotenv>=1.1,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=0.26,<2"]
+
+[project.scripts]
+form-agent-py = "python_poc.cli:main"
+form-evaluate-py = "python_poc.evaluation:main"
+
+[tool.setuptools.packages.find]
+include = ["python_poc*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["python_tests"]

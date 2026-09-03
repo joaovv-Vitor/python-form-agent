@@ -1,0 +1,16 @@
+{
+  "defaultProfile": "deepseek",
+  "profiles": {
+    "deepseek": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "baseURL": "https://api.deepseek.com",
+      "apiKeyEnv": "DEEPSEEK_API_KEY"
+    },
+    "openai": {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "apiKeyEnv": "OPENAI_API_KEY"
+    }
+  }
+}
