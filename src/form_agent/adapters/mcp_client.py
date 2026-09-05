@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 from types import TracebackType
 from typing import Any
 
-from ..config import PROJECT_ROOT
+from ..config import PROJECT_ROOT, BrowserConfig
 from ..core.errors import ToolClientError
 from ..core.schemas import FormInspection, JsonObject, ToolDefinition
 
@@ -21,7 +22,9 @@ class BrowserToolsClient:
     cliente mantem o mesmo contrato sem depender dessa camada de transporte.
     """
 
-    def __init__(self, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self, timeout_seconds: float = 30.0, *, browser_config: BrowserConfig | None = None
+    ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds deve ser maior que zero")
         self._timeout_seconds = timeout_seconds
@@ -29,12 +32,15 @@ class BrowserToolsClient:
         self._connect_lock = asyncio.Lock()
         self._request_lock = asyncio.Lock()
         self._next_request_id = 1
+        self._stderr_task: asyncio.Task[None] | None = None
+        self.browser_config = browser_config
+        self._ready = False
 
     async def connect(self) -> None:
-        if self._is_connected():
+        if self._ready and self._is_connected():
             return
         async with self._connect_lock:
-            if self._is_connected():
+            if self._ready and self._is_connected():
                 return
             try:
                 async with asyncio.timeout(self._timeout_seconds):
@@ -46,9 +52,11 @@ class BrowserToolsClient:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         cwd=PROJECT_ROOT,
-                        env=dict(os.environ),
+                        env=self._environment(),
+                        limit=1024 * 1024,
                     )
-                    await self._request(
+                    self._stderr_task = asyncio.create_task(self._drain_stderr(self._process))
+                    initialized = await self._request(
                         "initialize",
                         {
                             "protocolVersion": "2025-11-25",
@@ -56,12 +64,30 @@ class BrowserToolsClient:
                             "clientInfo": {"name": "form-agent", "version": "0.1.0"},
                         },
                     )
+                    if initialized.get("protocolVersion") != "2025-11-25":
+                        raise ToolClientError("Versão MCP incompatível.")
                     await self._notify("notifications/initialized")
+                    self._ready = True
             except Exception as exc:
                 await self.close()
                 raise ToolClientError(
                     "Não foi possível iniciar o servidor MCP do navegador."
                 ) from exc
+
+    def _environment(self) -> dict[str, str]:
+        environment = dict(os.environ)
+        if self.browser_config:
+            config = self.browser_config
+            environment.update(
+                {
+                    "FORM_URL": config.url,
+                    "HEADLESS": str(config.headless).lower(),
+                    "BROWSER_TIMEOUT_MS": str(config.timeout_ms),
+                    "BROWSER_EXECUTABLE_PATH": config.executable_path or "",
+                    "SUBMISSION_SUCCESS_SELECTOR": config.submission_success_selector,
+                }
+            )
+        return environment
 
     async def list_tools(self) -> list[ToolDefinition]:
         try:
@@ -69,6 +95,8 @@ class BrowserToolsClient:
                 response = await self._request_after_connect("tools/list")
         except ToolClientError:
             raise
+        except TimeoutError as exc:
+            raise ToolClientError("Timeout ao listar tools.", "TIMEOUT") from exc
         except Exception as exc:
             raise ToolClientError("Não foi possível listar as tools do navegador.") from exc
         tools = response.get("tools")
@@ -89,7 +117,17 @@ class BrowserToolsClient:
         return definitions
 
     async def inspect_form(self) -> FormInspection:
-        return FormInspection.from_mapping(await self.call_tool("inspect_form"))
+        output = await self.call_tool("inspect_form")
+        if output.get("success") is False:
+            raise ToolClientError(str(output.get("error")), str(output.get("code") or "TOOL_ERROR"))
+        return FormInspection.from_mapping(output)
+
+    async def set_submission_authorized(self, authorized: bool) -> None:
+        """Host control-plane method. Deliberately absent from tools/list and tools/call."""
+        async with asyncio.timeout(self._timeout_seconds):
+            await self._request_after_connect(
+                "form-agent/authorize-submission", {"authorized": authorized}
+            )
 
     async def call_tool(self, name: str, arguments: JsonObject | None = None) -> JsonObject:
         try:
@@ -99,12 +137,14 @@ class BrowserToolsClient:
                 )
         except ToolClientError:
             raise
+        except TimeoutError as exc:
+            raise ToolClientError(f"Timeout ao executar {name}.", "TIMEOUT") from exc
         except Exception as exc:
             raise ToolClientError(f"Falha ao executar a tool {name}.") from exc
-        if result.get("isError"):
+        structured = result.get("structuredContent")
+        if result.get("isError") and not isinstance(structured, dict):
             details = " ".join(self._text_content(result))
             raise ToolClientError(f"A tool {name} falhou: {details or 'erro não informado'}")
-        structured = result.get("structuredContent")
         if isinstance(structured, dict):
             return structured
         for text in self._text_content(result):
@@ -134,6 +174,16 @@ class BrowserToolsClient:
         return await self._request(method, params)
 
     async def _request(self, method: str, params: dict[str, Any] | None = None) -> JsonObject:
+        try:
+            return await self._request_locked(method, params)
+        except (asyncio.CancelledError, Exception):
+            # Never reuse a transport with an operation whose outcome is uncertain.
+            await self.close()
+            raise
+
+    async def _request_locked(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> JsonObject:
         async with self._request_lock:
             process = self._require_process()
             request_id = self._next_request_id
@@ -143,8 +193,12 @@ class BrowserToolsClient:
             )
             while True:
                 message = await self._read_message(process)
-                if message.get("id") != request_id:
+                if "id" not in message:
                     continue
+                if type(message["id"]) is not int or message["id"] != request_id:
+                    raise ToolClientError("ID de resposta MCP inesperado.")
+                if ("error" in message) == ("result" in message):
+                    raise ToolClientError("Envelope de resposta MCP inválido.")
                 if "error" in message:
                     raise ToolClientError(f"O servidor MCP respondeu com erro: {message['error']}")
                 result = message.get("result")
@@ -172,9 +226,17 @@ class BrowserToolsClient:
             message = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ToolClientError("O servidor MCP escreveu uma resposta inválida.") from exc
-        if not isinstance(message, dict):
+        if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
             raise ToolClientError("O servidor MCP retornou uma mensagem inválida.")
         return message
+
+    @staticmethod
+    async def _drain_stderr(process: asyncio.subprocess.Process) -> None:
+        if process.stderr is not None:
+            while chunk := await process.stderr.read(4096):
+                logging.getLogger(__name__).debug(
+                    "MCP stderr: %s", chunk.decode(errors="replace").rstrip()
+                )
 
     def _is_connected(self) -> bool:
         return self._process is not None and self._process.returncode is None
@@ -186,6 +248,7 @@ class BrowserToolsClient:
 
     async def close(self) -> None:
         process, self._process = self._process, None
+        self._ready = False
         if process is None:
             return
         if process.stdin is not None:
@@ -201,6 +264,9 @@ class BrowserToolsClient:
             except TimeoutError:
                 process.kill()
                 await process.wait()
+        if self._stderr_task is not None:
+            await self._stderr_task
+            self._stderr_task = None
 
     async def __aenter__(self) -> BrowserToolsClient:
         await self.connect()

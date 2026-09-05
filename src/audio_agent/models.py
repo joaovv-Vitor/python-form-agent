@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +29,7 @@ class TranscriptionSettings:
             raise ValueError("compute_type não pode ser vazio.")
         if self.beam_size <= 0:
             raise ValueError("beam_size deve ser maior que zero.")
-        if self.temperature < 0:
+        if not math.isfinite(self.temperature) or self.temperature < 0:
             raise ValueError("temperature não pode ser negativa.")
 
     def to_dict(self) -> dict[str, object]:

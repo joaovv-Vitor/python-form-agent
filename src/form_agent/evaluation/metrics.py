@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..core.schemas import JsonObject
@@ -26,6 +26,30 @@ class EvaluationRow:
     unmatched_correct: bool
     latency_ms: int
     error: str | None = None
+    functional_success: bool = False
+    error_codes: tuple[str, ...] = ()
+    unexpected_changes: JsonObject = field(default_factory=dict)
+    run_id: str = ""
+    mode: str = "text"
+    trace_path: str = ""
+    failure_stage: str | None = None
+    reference_text: str | None = None
+    transcription: str | None = None
+    word_edits: int | None = None
+    reference_words: int | None = None
+    character_edits: int | None = None
+    reference_characters: int | None = None
+    wer: float | None = None
+    cer: float | None = None
+    stt_seconds: float | None = None
+    form_seconds: float | None = None
+    total_seconds: float = 0.0
+    rtf: float | None = None
+    speaker: str = ""
+    scenario: str = ""
+    submission_attempted: bool = False
+    submission_authorized: bool = False
+    submitted: bool = False
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> EvaluationRow:
@@ -43,6 +67,7 @@ class EvaluationRow:
             unmatched_correct=bool(value.get("unmatched_correct", False)),
             latency_ms=int(value.get("latency_ms", 0)),
             error=str(value["error"]) if value.get("error") else None,
+            functional_success=bool(value.get("functional_success", False)),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -60,6 +85,7 @@ class EvaluationMetrics:
     p95_latency_ms: int
     unique_cases: int
     total_attempts: int
+    functional_success_rate: float = 0.0
 
     def to_dict(self) -> dict[str, float | int]:
         return asdict(self)
@@ -91,4 +117,5 @@ def calculate(rows: Sequence[EvaluationRow | Mapping[str, Any]]) -> EvaluationMe
         p95_latency_ms=latencies[p95_index],
         unique_cases=len(case_ids),
         total_attempts=len(normalized),
+        functional_success_rate=sum(row.functional_success for row in normalized) / len(normalized),
     )

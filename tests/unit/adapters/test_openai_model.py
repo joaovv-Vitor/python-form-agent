@@ -46,3 +46,31 @@ async def test_rejects_invalid_tool_arguments():
 
     with pytest.raises(ModelResponseError, match="JSON inválidos"):
         await session_with(Completions()).next([])
+
+
+@pytest.mark.parametrize("temperature", [None, 0.0])
+async def test_generation_parameters_are_omitted_or_forwarded_explicitly(temperature):
+    from dataclasses import replace
+
+    received = {}
+
+    class Completions:
+        async def create(self, **kwargs):
+            received.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            tool_calls=[],
+                            model_dump=lambda **kwargs: {"role": "assistant", "content": "ok"},
+                        )
+                    )
+                ]
+            )
+
+    session = session_with(Completions())
+    session._config = replace(session._config, temperature=temperature)
+    await session.next([])
+    assert ("temperature" in received) == (temperature is not None)
+    if temperature is not None:
+        assert received["temperature"] == temperature

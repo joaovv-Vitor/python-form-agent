@@ -6,33 +6,44 @@ import sys
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from ..adapters.playwright_browser import BrowserController
+from ..core.errors import error_code
 from ..core.schemas import JsonObject
 
 JsonRpcMessage = dict[str, Any]
 ToolHandler = Callable[[JsonObject], Awaitable[JsonObject]]
 
-controller = BrowserController()
+_controller: BrowserController | None = None
+
+
+def get_controller() -> BrowserController:
+    global _controller
+    if _controller is None:
+        _controller = BrowserController()
+    return _controller
 
 
 async def inspect_form(_: JsonObject) -> JsonObject:
     """Inspeciona semanticamente os controles do formulário."""
-    return (await controller.inspect_form()).to_dict()
+    return (await get_controller().inspect_form()).to_dict()
 
 
 async def fill_field(arguments: JsonObject) -> JsonObject:
     """Preenche um campo por label, name, id ou placeholder."""
-    return await controller.fill_field(str(arguments["field"]), str(arguments["value"]))
+    return await get_controller().fill_field(str(arguments["field"]), str(arguments["value"]))
 
 
 async def read_field(arguments: JsonObject) -> JsonObject:
     """Lê o valor atual de um campo."""
-    return await controller.read_field(str(arguments["field"]))
+    return await get_controller().read_field(str(arguments["field"]))
 
 
 async def click_button(arguments: JsonObject) -> JsonObject:
     """Clica em um botão identificado semanticamente."""
-    return await controller.click_button(str(arguments["button"]))
+    return await get_controller().click_button(str(arguments["button"]))
 
 
 TOOLS: dict[str, tuple[str, JsonObject, ToolHandler]] = {
@@ -89,10 +100,12 @@ def _error(request_id: object, code: int, message: str) -> JsonRpcMessage:
 async def _handle(message: JsonRpcMessage) -> JsonRpcMessage | None:
     method = message.get("method")
     request_id = message.get("id")
-    if not isinstance(method, str):
+    if message.get("jsonrpc") != "2.0" or not isinstance(method, str):
         return _error(request_id, -32600, "Requisição JSON-RPC inválida.")
     if "id" not in message:
         return None
+    if type(request_id) not in (int, str):
+        return _error(None, -32600, "ID JSON-RPC inválido.")
     if method == "initialize":
         return _result(
             request_id,
@@ -112,6 +125,12 @@ async def _handle(message: JsonRpcMessage) -> JsonRpcMessage | None:
                 ]
             },
         )
+    if method == "form-agent/authorize-submission":
+        params = message.get("params")
+        if not isinstance(params, dict) or type(params.get("authorized")) is not bool:
+            return _error(request_id, -32602, "authorized deve ser booleano.")
+        get_controller().submission_authorized = params["authorized"]
+        return _result(request_id, {"success": True})
     if method != "tools/call":
         return _error(request_id, -32601, f"Método MCP desconhecido: {method}")
     params = message.get("params")
@@ -123,34 +142,42 @@ async def _handle(message: JsonRpcMessage) -> JsonRpcMessage | None:
     arguments = params.get("arguments", {})
     if not isinstance(arguments, dict):
         return _error(request_id, -32602, "Os argumentos da tool devem ser um objeto.")
+    properties = tool[1].get("properties", {})
+    required = tool[1].get("required", [])
+    if (
+        not isinstance(properties, dict)
+        or not isinstance(required, list)
+        or any(key not in arguments for key in required)
+        or any(
+            key not in properties or not isinstance(value, str) for key, value in arguments.items()
+        )
+    ):
+        return _error(request_id, -32602, "Argumentos ausentes, desconhecidos ou de tipo inválido.")
     try:
         output = await tool[2](arguments)
-    except (KeyError, TypeError, ValueError) as exc:
-        return _result(
-            request_id,
-            {"content": [{"type": "text", "text": str(exc)}], "isError": True},
-        )
-    except Exception:
-        return _result(
-            request_id,
-            {
-                "content": [{"type": "text", "text": "Falha ao executar a tool."}],
-                "isError": True,
-            },
-        )
+    except PlaywrightTimeoutError:
+        output = {"success": False, "code": "TIMEOUT", "error": "Timeout da automação"}
+    except PlaywrightError:
+        output = {
+            "success": False,
+            "code": "BROWSER_ERROR",
+            "error": "Falha da automação Playwright",
+        }
+    except Exception as exc:
+        output = {"success": False, "code": error_code(exc), "error": str(exc)}
     return _result(
         request_id,
         {
             "content": [{"type": "text", "text": json.dumps(output, ensure_ascii=False)}],
             "structuredContent": output,
-            "isError": False,
+            "isError": output.get("success") is False,
         },
     )
 
 
 async def serve_stdio() -> None:
     """Atende MCP por stdio sem o transporte AnyIO incompatível com Python 3.14."""
-    reader = asyncio.StreamReader()
+    reader = asyncio.StreamReader(limit=1024 * 1024)
     protocol = asyncio.StreamReaderProtocol(reader)
     loop = asyncio.get_running_loop()
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
@@ -171,7 +198,8 @@ async def serve_stdio() -> None:
                 sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
                 sys.stdout.flush()
     finally:
-        await controller.close()
+        if _controller is not None:
+            await _controller.close()
 
 
 if __name__ == "__main__":

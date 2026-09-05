@@ -48,8 +48,9 @@ reports/
 # Local audio used in reproducible experiments
 samples/*
 !samples/.gitkeep
-evaluation/audio/audios/*
-!evaluation/audio/audios/.gitkeep
+evaluation/audio/audios/**
+!evaluation/audio/audios/**/
+!evaluation/audio/audios/**/.gitkeep
 
 # Editors and operating systems
 .idea/

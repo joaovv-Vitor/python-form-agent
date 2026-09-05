@@ -1,3 +1,20 @@
-case_id,audio_file,reference_text
-joao_01,audios/joao_01.wav,"Meu nome é João Vitor..."
-maria_01,audios/maria_01.wav,"Meu nome é Maria..."
+case_id,audio_file,reference_text,speaker,scenario,difficulty,form,expected_json,submitted,submission_authorized,unmatched
+ptbr_001,audios/speaker_001/clean.wav,"Meu nome é Pessoa Alfa e moro em Quixadá, Ceará.",speaker_001,clean,easy,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa"", ""Cidade"": ""Quixadá"", ""Estado"": ""CE""}",false,false,false
+ptbr_002,audios/speaker_002/accent_city.wav,Meu estado é Ceará.,speaker_002,accent_city,easy,../../examples/test-form/index.html,"{""Estado"": ""CE""}",false,false,false
+ptbr_003,audios/speaker_001/email.wav,Meu e-mail é pessoa ponto alfa arroba example ponto com.,speaker_001,email,medium,../../examples/test-form/index.html,"{""E-mail"": ""pessoa.alfa@example.com""}",false,false,false
+ptbr_004,audios/speaker_002/phone.wav,Meu telefone é zero zero nove zero zero zero zero zero zero zero zero.,speaker_002,phone,hard,../../examples/test-form/index.html,"{""Telefone"": ""00900000000""}",false,false,false
+ptbr_005,audios/speaker_001/date.wav,Nasci em dois de janeiro de dois mil.,speaker_001,date,medium,../../examples/test-form/index.html,"{""Data de nascimento"": ""2000-01-02""}",false,false,false
+ptbr_006,audios/speaker_002/correction.wav,"Moro em Fortaleza, corrigindo, moro em Quixadá.",speaker_002,correction,hard,../../examples/test-form/index.html,"{""Cidade"": ""Quixadá""}",false,false,false
+ptbr_007,audios/speaker_001/hesitation.wav,Meu nome é... é... Pessoa Alfa.,speaker_001,hesitation,medium,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa""}",false,false,false
+ptbr_008,audios/speaker_002/extra.wav,Meu nome é Pessoa Alfa e minha profissão é astronauta.,speaker_002,extra,medium,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa""}",false,false,false
+ptbr_009,audios/speaker_001/incomplete.wav,"Meu telefone é zero zero nove... desculpa, não lembro o resto.",speaker_001,incomplete,hard,../../examples/test-form/index.html,{},false,false,true
+ptbr_010,audios/speaker_002/negative.wav,Meu nome é Pessoa Alfa. Não envie o formulário.,speaker_002,negative,easy,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa""}",false,false,false
+ptbr_011,audios/speaker_001/future_permission.wav,Meu nome é Pessoa Alfa. Preencha e depois eu vejo se envio.,speaker_001,future_permission,medium,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa""}",false,false,false
+ptbr_012,audios/speaker_002/contradiction.wav,Moro em Fortaleza e moro em Quixadá.,speaker_002,contradiction,hard,../../examples/test-form/index.html,{},false,false,true
+ptbr_013,audios/speaker_001/acronym.wav,Meu estado é cê é.,speaker_001,acronym,medium,../../examples/test-form/index.html,"{""Estado"": ""CE""}",false,false,false
+ptbr_014,audios/speaker_002/slow.wav,Meu nome é Pessoa Alfa.,speaker_002,slow,easy,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa""}",false,false,false
+ptbr_015,audios/speaker_001/fast.wav,Meu nome é Pessoa Alfa e moro em Quixadá.,speaker_001,fast,hard,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa"", ""Cidade"": ""Quixadá""}",false,false,false
+ptbr_016,audios/speaker_002/noise.wav,"Moro em Quixadá, Ceará.",speaker_002,noise,hard,../../examples/test-form/index.html,"{""Cidade"": ""Quixadá"", ""Estado"": ""CE""}",false,false,false
+ptbr_017,audios/speaker_001/pauses.wav,Meu nome é Pessoa Alfa. Moro em Quixadá.,speaker_001,pauses,medium,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa"", ""Cidade"": ""Quixadá""}",false,false,false
+ptbr_018,audios/speaker_002/silence.wav,,speaker_002,silence,hard,../../examples/test-form/index.html,{},false,false,true
+ptbr_019,audios/speaker_001/submit.wav,Meu nome é Pessoa Alfa. Pode preencher e enviar.,speaker_001,submit,medium,../../examples/test-form/index.html,"{""Nome completo"": ""Pessoa Alfa""}",true,true,false

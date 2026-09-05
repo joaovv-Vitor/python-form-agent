@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><title>Formulário adversarial local</title>
+<form id="form">
+  <label for="name">Nome completo</label><input id="name" value="Pessoa Exemplo">
+  <input placeholder="Cidade de residência">
+  <input aria-label="Contato eletrônico" id="email" type="email" required>
+  <span id="phone-label">Telefone alternativo</span><input id="phone" aria-labelledby="phone-label" type="tel">
+  <label for="a">Nome</label><input id="a">
+  <label for="b">Nome</label><input id="b">
+  <label for="secret">Oculto</label><input id="secret" type="hidden" value="sentinela">
+  <label for="css-hidden">Cidade de residência</label><input id="css-hidden" style="display:none">
+  <label for="locked">Bloqueado</label><input id="locked" disabled value="fixo">
+  <label for="readonly">Somente leitura</label><input id="readonly" readonly value="fixo">
+  <label for="state">Estado</label><select id="state"><option value="">Selecione</option><option value="CE">Ceará</option></select>
+  <fieldset><legend>Preferência de contato</legend>
+    <label><input id="by-email" type="radio" name="channel" value="email">Por e-mail</label>
+    <label><input id="by-phone" type="radio" name="channel" value="phone">Por telefone</label>
+  </fieldset>
+  <label><input id="extra" type="checkbox">Adicionar complemento</label><div id="dependent"></div>
+  <label for="date">Data</label><input id="date" type="date">
+  <button type="button" id="resetButton">Limpar</button>
+  <button type="submit">Enviar</button>
+  <output id="status"></output>
+</form>
+<script>
+  document.querySelector('#extra').addEventListener('change', e => {
+    document.querySelector('#dependent').innerHTML = e.target.checked ? '<label for="complement">Complemento</label><input id="complement">' : '';
+  });
+  document.querySelector('#phone').addEventListener('input', e => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 11);
+    e.target.value = digits.length === 11 ? `(${digits.slice(0,2)}) ${digits.slice(2,7)}-${digits.slice(7)}` : digits;
+  });
+  document.querySelector('#form').addEventListener('submit', e => {
+    e.preventDefault();
+    const status = document.querySelector('#status');
+    if (document.querySelector('#email').value === 'recusado@example.com') { status.textContent = 'Validação JavaScript recusou'; return; }
+    status.dataset.formAgentSubmitted = 'true'; status.textContent = 'Envio simulado';
+  });
+</script></html>

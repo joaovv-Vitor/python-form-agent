@@ -1,9 +1,8 @@
 """Local faster-whisper adapter, isolated from the rest of the application."""
 
-# mypy: disable-error-code="import-not-found,import-untyped"
-
 from __future__ import annotations
 
+from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -26,14 +25,15 @@ class FasterWhisperSpeechToTextEngine:
             return self._model
 
         try:
-            from faster_whisper import WhisperModel
+            # Optional, untyped dependency stays confined to this runtime adapter.
+            whisper_model = import_module("faster_whisper").WhisperModel
         except ImportError as exc:
             raise TranscriptionEngineUnavailableError(
                 "faster-whisper não está instalado. Execute: python -m pip install -e '.[audio]'"
             ) from exc
 
         try:
-            self._model = WhisperModel(
+            self._model = whisper_model(
                 settings.model,
                 device=settings.device,
                 compute_type=settings.compute_type,

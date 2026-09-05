@@ -34,6 +34,14 @@ class FormField:
     required: bool = False
     disabled: bool = False
     options: tuple[FormOption, ...] = ()
+    value: JsonValue = None
+    valid: bool | None = None
+    validation_message: str = ""
+    readonly: bool = False
+
+    @property
+    def reference(self) -> str:
+        return self.id or self.name or self.label
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> FormField:
@@ -51,6 +59,10 @@ class FormField:
             required=bool(value.get("required", False)),
             disabled=bool(value.get("disabled", False)),
             options=options,
+            value=value.get("value"),
+            valid=value.get("valid"),
+            validation_message=str(value.get("validation_message") or ""),
+            readonly=bool(value.get("readonly", False)),
         )
 
     def to_dict(self) -> JsonObject:
@@ -63,6 +75,10 @@ class FormField:
             "placeholder": self.placeholder,
             "required": self.required,
             "disabled": self.disabled,
+            "value": self.value,
+            "valid": self.valid,
+            "validation_message": self.validation_message,
+            "readonly": self.readonly,
         }
         if self.options:
             result["options"] = [option.to_dict() for option in self.options]
@@ -162,6 +178,15 @@ class ToolCompletion:
 class FilledField:
     field: str
     value: JsonValue
+    reference: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RunIssue:
+    code: str
+    stage: str
+    message: str
+    tool: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,3 +197,8 @@ class AgentResult:
     submitted: bool
     unmatched: bool
     turn_limit_reached: bool = False
+    final_inspection: FormInspection | None = None
+    issues: tuple[RunIssue, ...] = ()
+    submission_attempted: bool = False
+    submission_authorized: bool = False
+    verification_complete: bool = True

@@ -5,7 +5,11 @@ import logging
 import os
 
 from .bootstrap import create_application
+from .config import PROJECT_ROOT, load_browser_config
+from .confirmation import confirm_submission
+from .core.agent import submission_requested
 from .core.errors import ConfigurationError, FormAgentError
+from .experiments import RunTrace, metadata
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +44,26 @@ async def run_cli() -> None:
                 break
             if instruction:
                 try:
-                    result = await application.agent.run(instruction)
+                    with RunTrace(
+                        PROJECT_ROOT / "reports/runs",
+                        metadata(
+                            model=application.config,
+                            browser=load_browser_config(),
+                            max_turns=application.agent.max_turns,
+                        ),
+                    ) as trace:
+                        application.agent.events = trace.emit
+                        result = await application.agent.run(instruction)
+                        print(f"Agente> {result.message}")
+                        submitted = result.submitted
+                        if submission_requested(instruction):
+                            output = await confirm_submission(application, result)
+                            trace.emit("human_submission", output)
+                            submitted = submitted or output.get("submitted") is True
+                            print(
+                                f"Agente> {output.get('error') or ('Envio confirmado.' if output.get('submitted') else 'Envio não confirmado.')}"
+                            )
+                        trace.emit("run_completed", {"submitted": submitted})
                 except FormAgentError as exc:
                     print(f"Agente> Não foi possível concluir a solicitação: {exc}")
                 except Exception:
@@ -48,8 +71,7 @@ async def run_cli() -> None:
                     print(
                         "Agente> Ocorreu um erro inesperado. Consulte os logs para mais detalhes."
                     )
-                else:
-                    print(f"Agente> {result.message}")
+
     finally:
         await application.close()
 

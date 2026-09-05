@@ -9,5 +9,5 @@
 <div class="field"><label for="state">Estado</label><select id="state" name="state"><option value="">Selecione</option><option value="CE">Ceará</option><option value="PB">Paraíba</option><option value="PE">Pernambuco</option><option value="PI">Piauí</option><option value="RN">Rio Grande do Norte</option></select></div>
 <div class="terms"><input id="acceptTerms" name="acceptTerms" type="checkbox"><label for="acceptTerms">Aceito os termos</label></div>
 <button id="submitButton" name="submitButton" type="submit">Enviar</button><output id="submit-status"></output></form>
-<script>registrationForm.addEventListener('submit',e=>{e.preventDefault();document.querySelector('#submit-status').textContent='Formulário enviado (simulação).'})</script>
+<script>registrationForm.addEventListener('submit',e=>{e.preventDefault();document.querySelector('#submit-status').dataset.formAgentSubmitted='true';document.querySelector('#submit-status').textContent='Formulário enviado (simulação).'})</script>
 </main></body></html>

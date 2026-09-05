@@ -23,6 +23,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("audio_file", type=Path, help="Caminho para WAV, MP3, M4A ou FLAC.")
     parser.add_argument("--json", action="store_true", help="Imprime o resultado em JSON.")
+    add_transcription_arguments(parser)
+    parser.add_argument("--verbose", action="store_true")
+    return parser
+
+
+def add_transcription_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model", default="small", help="Modelo Whisper a utilizar (padrão: small)."
     )
@@ -35,8 +41,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beam-size", type=int, default=5)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--vad-filter", action="store_true")
-    parser.add_argument("--verbose", action="store_true")
-    return parser
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -46,7 +50,7 @@ def _configure_logging(verbose: bool) -> None:
     )
 
 
-def _settings_from_arguments(arguments: argparse.Namespace) -> TranscriptionSettings:
+def settings_from_arguments(arguments: argparse.Namespace) -> TranscriptionSettings:
     return TranscriptionSettings(
         model=arguments.model,
         language=arguments.language,
@@ -76,7 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     _configure_logging(arguments.verbose)
     try:
-        settings = _settings_from_arguments(arguments)
+        settings = settings_from_arguments(arguments)
         agent = AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine())
         result = agent.transcribe(arguments.audio_file, settings)
     except (AudioAgentError, ValueError) as exc:
