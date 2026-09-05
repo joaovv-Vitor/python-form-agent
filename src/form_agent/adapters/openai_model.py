@@ -24,11 +24,9 @@ from ..core.errors import (
 )
 from ..core.interfaces import ModelSession
 from ..core.schemas import FormInspection, ToolCall, ToolCompletion, ToolDefinition
+from ..prompts import load_prompt
 
-SYSTEM_PROMPT = """Você é um agente de preenchimento de formulários web.
-Use somente as tools fornecidas. Baseie-se no inventário do formulário. Não invente correspondências.
-Confirme cada fill_field com read_field. Só clique em Enviar se a instrução atual pedir explicitamente.
-Datas para input date devem usar YYYY-MM-DD; select usa texto visível; checkbox usa true ou false."""
+SYSTEM_PROMPT = load_prompt("form-agent-v2")
 
 
 class OpenAIModelSession:
@@ -45,7 +43,7 @@ class OpenAIModelSession:
         self._client = client
         self._config = config
         self._messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": load_prompt(config.prompt_version)},
             {
                 "role": "user",
                 "content": (
@@ -65,12 +63,16 @@ class OpenAIModelSession:
                     "content": json.dumps(item.output, ensure_ascii=False),
                 }
             )
+        parameters: dict[str, Any] = {}
+        if self._config.temperature is not None:
+            parameters["temperature"] = self._config.temperature
         try:
             response = await self._client.chat.completions.create(
                 model=self._config.model,
                 messages=cast(Any, self._messages),
                 tools=cast(Any, self._tools),
                 tool_choice="auto",
+                **parameters,
             )
         except AuthenticationError as exc:
             raise ModelAuthenticationError(
@@ -127,6 +129,7 @@ class OpenAICompatibleModel:
             api_key=config.api_key,
             base_url=config.base_url,
             timeout=config.timeout_seconds,
+            max_retries=config.max_retries,
         )
 
     def create_session(

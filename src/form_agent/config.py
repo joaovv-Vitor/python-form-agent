@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +30,12 @@ class ModelConfig:
     profile: str
     provider: str
     model: str
-    api_key: str
+    api_key: str = field(repr=False)
     base_url: str | None = None
     timeout_seconds: float = 60.0
+    temperature: float | None = None
+    max_retries: int = 0
+    prompt_version: str = "form-agent-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +44,7 @@ class BrowserConfig:
     headless: bool = True
     timeout_ms: float = 30_000
     executable_path: str | None = None
+    submission_success_selector: str = '[data-form-agent-submitted="true"]'
 
 
 def _positive_float(value: str, variable: str) -> float:
@@ -47,7 +52,7 @@ def _positive_float(value: str, variable: str) -> float:
         parsed = float(value)
     except ValueError as exc:
         raise ConfigurationError(f"{variable} deve ser um número.") from exc
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         raise ConfigurationError(f"{variable} deve ser maior que zero.")
     return parsed
 
@@ -122,6 +127,15 @@ def load_model_config(
     profile_base_url = profile.get("baseURL")
     base_url = configured_base_url or (str(profile_base_url).strip() if profile_base_url else None)
     timeout = _positive_float(os.getenv("LLM_TIMEOUT_SECONDS", "60"), "LLM_TIMEOUT_SECONDS")
+    temperature_raw = os.getenv("LLM_TEMPERATURE")
+    temperature = None
+    if temperature_raw:
+        try:
+            temperature = float(temperature_raw)
+        except ValueError as exc:
+            raise ConfigurationError("LLM_TEMPERATURE deve ser um número.") from exc
+        if not math.isfinite(temperature) or not 0 <= temperature <= 2:
+            raise ConfigurationError("LLM_TEMPERATURE deve estar entre 0 e 2.")
     return ModelConfig(
         profile=profile_name,
         provider=provider,
@@ -129,6 +143,8 @@ def load_model_config(
         api_key=api_key,
         base_url=base_url,
         timeout_seconds=timeout,
+        temperature=temperature,
+        prompt_version=os.getenv("FORM_PROMPT_VERSION", "form-agent-v2"),
     )
 
 
@@ -142,7 +158,13 @@ def load_browser_config(*, env_file: Path | None = DEFAULT_ENV_FILE) -> BrowserC
     timeout_ms = _positive_float(os.getenv("BROWSER_TIMEOUT_MS", "30000"), "BROWSER_TIMEOUT_MS")
     executable_path = (os.getenv("BROWSER_EXECUTABLE_PATH") or "").strip() or None
     return BrowserConfig(
-        url=url, headless=headless, timeout_ms=timeout_ms, executable_path=executable_path
+        url=url,
+        headless=headless,
+        timeout_ms=timeout_ms,
+        executable_path=executable_path,
+        submission_success_selector=os.getenv(
+            "SUBMISSION_SUCCESS_SELECTOR", '[data-form-agent-submitted="true"]'
+        ),
     )
 
 

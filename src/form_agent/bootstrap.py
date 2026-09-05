@@ -7,8 +7,15 @@ from dataclasses import dataclass
 
 from .adapters.mcp_client import BrowserToolsClient
 from .adapters.openai_model import OpenAICompatibleModel
-from .config import ModelConfig, load_agent_max_turns, load_model_config
+from .config import (
+    BrowserConfig,
+    ModelConfig,
+    load_agent_max_turns,
+    load_browser_config,
+    load_model_config,
+)
 from .core.agent import FormAgent
+from .core.events import EventSink, discard_event
 
 
 @dataclass(slots=True)
@@ -31,9 +38,11 @@ class Application:
                 continue
 
 
-def create_application() -> Application:
+def create_application(
+    *, events: EventSink = discard_event, browser_config: BrowserConfig | None = None
+) -> Application:
     config = load_model_config()
-    client = BrowserToolsClient()
+    client = BrowserToolsClient(browser_config=browser_config or load_browser_config())
     model = OpenAICompatibleModel(config)
-    agent = FormAgent(client, model, max_turns=load_agent_max_turns())
+    agent = FormAgent(client, model, max_turns=load_agent_max_turns(), events=events)
     return Application(config=config, agent=agent, client=client, model=model)

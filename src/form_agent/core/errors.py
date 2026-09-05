@@ -34,6 +34,10 @@ class ModelResponseError(ModelError):
 class ToolClientError(FormAgentError):
     """Raised when the MCP tool client cannot complete an operation."""
 
+    def __init__(self, message: str, code: str = "TOOL_ERROR") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class BrowserControllerError(FormAgentError):
     """Base class for browser automation failures."""
@@ -45,3 +49,19 @@ class ElementNotFoundError(BrowserControllerError):
 
 class AmbiguousElementError(BrowserControllerError):
     """Raised when a semantic query matches more than one element."""
+
+
+def error_code(error: Exception) -> str:
+    if isinstance(error, ToolClientError):
+        return error.code
+    if isinstance(error, ElementNotFoundError):
+        return "FIELD_NOT_FOUND"
+    if isinstance(error, AmbiguousElementError):
+        return "FIELD_AMBIGUOUS"
+    if isinstance(error, BrowserControllerError):
+        return "BROWSER_ERROR"
+    if isinstance(error, ModelError):
+        return "PROVIDER_ERROR"
+    if isinstance(error, TimeoutError):
+        return "TIMEOUT"
+    return "TOOL_ERROR"

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import csv
 import html
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .metrics import EvaluationMetrics, EvaluationRow
 
 
 def write_reports(
-    metrics: EvaluationMetrics,
+    metrics: EvaluationMetrics | Mapping[str, float | int],
     rows: Sequence[EvaluationRow],
     stamp: str,
     output_directory: Path,
@@ -21,7 +21,7 @@ def write_reports(
     output_directory.mkdir(parents=True, exist_ok=True)
     csv_path = output_directory / f"python-evaluation-report_{stamp}.csv"
     html_path = output_directory / f"python-evaluation-report_{stamp}.html"
-    metric_values = metrics.to_dict()
+    metric_values = metrics.to_dict() if isinstance(metrics, EvaluationMetrics) else dict(metrics)
     row_values = [row.to_dict() for row in rows]
 
     with csv_path.open("w", encoding="utf-8-sig", newline="") as file:
@@ -47,11 +47,11 @@ def write_reports(
         "grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}"
         "article,table{background:white;padding:16px;border-radius:10px}"
         "strong{display:block;font-size:24px;color:#155e75;margin-top:8px}"
-        "table{margin-top:20px;border-collapse:collapse;width:100%}"
+        "table{margin-top:20px;border-collapse:collapse;width:100%}.results{overflow-x:auto}"
         "td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}"
         "</style></head><body><main><h1>Avaliação da PoC Python</h1>"
-        f"<section>{cards}</section><table><thead><tr>{headers}</tr></thead>"
-        f"<tbody>{table_rows}</tbody></table></main></body></html>",
+        f'<section>{cards}</section><div class="results"><table><thead><tr>{headers}</tr></thead>'
+        f"<tbody>{table_rows}</tbody></table></div></main></body></html>",
         encoding="utf-8",
     )
     return html_path, csv_path

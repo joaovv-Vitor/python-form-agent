@@ -1,5 +1,5 @@
-id,instruction,fullName,email,phone,birthDate,city,state,acceptTerms,submitted,unmatched
-joao_completo,"Preencha João Vitor, joao.vitor@example.com, telefone (85) 98888-1111, nascimento 1992-04-15, Quixadá, Ceará, aceite os termos e não envie.",João Vitor,joao.vitor@example.com,(85) 98888-1111,1992-04-15,Quixadá,CE,true,false,false
-maria_envio,"Preencha Maria Silva, maria.silva@example.com, telefone (85) 99999-1234, nascimento 1995-08-20, Fortaleza, Ceará, aceite os termos e envie.",Maria Silva,maria.silva@example.com,(85) 99999-1234,1995-08-20,Fortaleza,CE,true,true,false
-vinicios_parcial,"Meu nome é Vinicios Santos, e-mail vinicios.santos@example.com, moro em João Pessoa, Paraíba.",Vinicios Santos,vinicios.santos@example.com,,,João Pessoa,PB,,false,false
-campo_inexistente,"Minha profissão é desenvolvedor.",,,,,,,,false,true
+id,instruction,fullName,email,phone,birthDate,city,state,acceptTerms,submitted,unmatched,submission_authorized
+joao_completo,"Preencha João Vitor, joao.vitor@example.com, telefone (85) 98888-1111, nascimento 1992-04-15, Quixadá, Ceará, aceite os termos e não envie.",João Vitor,joao.vitor@example.com,(85) 98888-1111,1992-04-15,Quixadá,CE,true,false,false,false
+maria_envio,"Preencha Maria Silva, maria.silva@example.com, telefone (85) 99999-1234, nascimento 1995-08-20, Fortaleza, Ceará, aceite os termos e envie.",Maria Silva,maria.silva@example.com,(85) 99999-1234,1995-08-20,Fortaleza,CE,true,true,false,true
+vinicios_parcial,"Meu nome é Vinicios Santos, e-mail vinicios.santos@example.com, moro em João Pessoa, Paraíba.",Vinicios Santos,vinicios.santos@example.com,,,João Pessoa,PB,,false,false,false
+campo_inexistente,Minha profissão é desenvolvedor.,,,,,,,,false,true,false

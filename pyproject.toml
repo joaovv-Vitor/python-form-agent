@@ -5,17 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "form-agent-poc-python"
 version = "0.1.0"
-description = "Agente baseado em LLM para preenchimento seguro de formulários web"
+description = "PoC multiagente para transcrição de áudio e preenchimento seguro de formulários"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-  "mcp>=1.27,<2",
+  "mcp>=2.1,<3",
   "openai>=1.99,<3",
   "playwright>=1.58,<2",
   "python-dotenv>=1.1,<2",
 ]
 
 [project.optional-dependencies]
+audio = ["faster-whisper>=1.1,<2"]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.26,<2"]
 dev = [
   "mypy>=1.15,<2",
@@ -25,33 +26,43 @@ dev = [
 ]
 
 [project.scripts]
+audio-agent-py = "audio_agent.cli:main"
+audio-evaluate-py = "voice_form.evaluation:audio_main"
+pipeline-evaluate-py = "voice_form.evaluation:main"
+voice-form-agent-py = "voice_form.cli:main"
 form-agent-py = "form_agent.cli:main"
 form-evaluate-py = "form_agent.evaluation.runner:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.package-data]
+"form_agent.prompts" = ["*.txt"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["form_agent*"]
+include = ["audio_agent*", "form_agent*", "voice_form*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["integration: tests that launch the MCP server and a real browser"]
+markers = [
+  "integration: tests that require external runtime dependencies",
+  "whisper_integration: tests that load a local faster-whisper model",
+]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
-files = ["src/form_agent"]
+python_version = "3.12"
+files = ["src/audio_agent", "src/form_agent", "src/voice_form"]
 check_untyped_defs = true
 disallow_untyped_defs = true
 no_implicit_optional = true

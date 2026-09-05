@@ -101,3 +101,98 @@ async def test_reports_turn_limit():
     result = await FormAgent(tools, model, max_turns=1).run("Preencha o formulário")
     assert result.turn_limit_reached is True
     assert "limite de interações" in result.message
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "Pode preencher e enviar.",
+        "Talvez eu queira enviar amanhã.",
+        "A mensagem deve conter a palavra envie.",
+        "Não desejo de forma alguma que você envie.",
+        "Preencha e depois eu vejo se envio.",
+    ],
+)
+async def test_text_never_grants_authority(instruction):
+    tools = FakeTools()
+    model = FakeModel([[ToolCall("1", "click_button", {"button": "Enviar"})]])
+    result = await FormAgent(tools, model).run(instruction)
+    assert not result.submitted
+    assert not result.submission_authorized
+    assert not any(name == "click_button" for name, _ in tools.calls)
+    assert result.issues[0].code == "SUBMISSION_BLOCKED"
+
+
+async def test_negative_instruction_vetoes_external_authorization():
+    tools = FakeTools()
+    model = FakeModel([[ToolCall("1", "click_button", {"button": "Enviar"})]])
+    result = await FormAgent(tools, model).run(
+        "Não desejo de forma alguma que você envie.",
+        authorize_submission=True,
+    )
+    assert not result.submission_authorized
+    assert not tools.calls
+
+
+async def test_final_read_happens_after_latest_write_and_detects_failure():
+    tools = FakeTools()
+    model = FakeModel(
+        [
+            [
+                ToolCall("1", "fill_field", {"field": "Nome completo", "value": "João"}),
+                ToolCall("2", "read_field", {"field": "Nome completo"}),
+                ToolCall("3", "fill_field", {"field": "Nome completo", "value": "Maria"}),
+            ]
+        ]
+    )
+    result = await FormAgent(tools, model).run("Corrija João para Maria")
+    assert tools.calls[-1][0] == "read_field"
+    assert result.filled[0].value == "João"
+    assert not result.verification_complete
+    assert "VERIFICATION_ERROR" in [issue.code for issue in result.issues]
+
+
+async def test_successful_click_is_not_submission_evidence():
+    tools = FakeTools()
+    model = FakeModel([[ToolCall("1", "click_button", {"button": "Enviar"})]])
+    result = await FormAgent(tools, model).run("Envie", authorize_submission=True)
+    assert not result.submitted
+
+
+async def test_server_cannot_expand_tool_allowlist():
+    class ExtraTools(FakeTools):
+        async def list_tools(self):
+            return [*await super().list_tools(), ToolDefinition("shell", "unsafe", {})]
+
+    tools = ExtraTools()
+    result = await FormAgent(tools, FakeModel([[ToolCall("1", "shell", {})]])).run("Preencha")
+    assert not tools.calls
+    assert result.issues[0].code == "TOOL_ERROR"
+
+
+async def test_host_submission_rejects_changed_reviewed_state():
+    from dataclasses import replace
+
+    from form_agent.core.schemas import AgentResult
+
+    tools = FakeTools()
+    before = await tools.inspect_form()
+    reviewed = replace(before, fields=(replace(before.fields[0], value="Pessoa Alfa"),))
+    result = AgentResult("", before, (), False, False, final_inspection=reviewed)
+    output = await FormAgent(tools, FakeModel([])).submit(result, "Enviar", authorized=True)
+    assert output["code"] == "VERIFICATION_ERROR"
+    assert not tools.calls
+
+
+async def test_host_submission_requires_permission_and_completed_run():
+    from form_agent.core.schemas import AgentResult
+
+    tools = FakeTools()
+    inspection = await tools.inspect_form()
+    result = AgentResult(
+        "", inspection, (), False, False, turn_limit_reached=True, final_inspection=inspection
+    )
+    agent = FormAgent(tools, FakeModel([]))
+    assert (await agent.submit(result, "Enviar"))["code"] == "SUBMISSION_BLOCKED"
+    assert (await agent.submit(result, "Enviar", authorized=True))["code"] == "SUBMISSION_BLOCKED"
+    assert not tools.calls
