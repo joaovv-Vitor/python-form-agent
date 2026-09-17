@@ -10,15 +10,16 @@ from audio_agent.exceptions import (
 from audio_agent.preprocessing import AudioPreprocessor
 
 
-def test_prepare_accepts_supported_audio_file(tmp_path: Path):
-    audio_file = tmp_path / "sample.WAV"
+@pytest.mark.parametrize("extension", ["WAV", "mp3", "mp4", "m4a", "flac"])
+def test_prepare_accepts_supported_audio_file(tmp_path: Path, extension: str):
+    audio_file = tmp_path / f"sample.{extension}"
     audio_file.write_bytes(b"audio")
 
     prepared = AudioPreprocessor().prepare(audio_file)
 
     assert prepared.input_path == audio_file
     assert prepared.resolved_path == audio_file.resolve()
-    assert prepared.media_format == "wav"
+    assert prepared.media_format == extension.lower()
     assert prepared.size_bytes == 5
 
 

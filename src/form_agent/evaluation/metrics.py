@@ -47,6 +47,13 @@ class EvaluationRow:
     rtf: float | None = None
     speaker: str = ""
     scenario: str = ""
+    stt_model: str = ""
+    stt_language: str | None = None
+    stt_device: str = ""
+    stt_compute_type: str = ""
+    stt_beam_size: int | None = None
+    stt_temperature: float | None = None
+    stt_vad_filter: bool = False
     submission_attempted: bool = False
     submission_authorized: bool = False
     submitted: bool = False

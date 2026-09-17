@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, replace
@@ -20,7 +21,11 @@ from audio_agent.preprocessing import AudioPreprocessor
 from form_agent.bootstrap import Application, create_application
 from form_agent.config import PROJECT_ROOT, load_browser_config
 from form_agent.core.errors import FormAgentError, error_code
-from form_agent.evaluation.cases import EvaluationCase, load_audio_cases
+from form_agent.evaluation.cases import (
+    EvaluationCase,
+    load_audio_cases,
+    load_dataset_audio_cases,
+)
 from form_agent.evaluation.metrics import EvaluationRow, calculate
 from form_agent.evaluation.reporting import write_reports
 from form_agent.evaluation.runner import _run_attempt, failure_row, score_form
@@ -120,6 +125,13 @@ async def run_audio_attempt(
         total_seconds=elapsed,
         latency_ms=round(elapsed * 1000),
         form_seconds=form_seconds,
+        stt_model=settings.model if mode != "reference" else "",
+        stt_language=settings.language if mode != "reference" else None,
+        stt_device=settings.device if mode != "reference" else "",
+        stt_compute_type=settings.compute_type if mode != "reference" else "",
+        stt_beam_size=settings.beam_size if mode != "reference" else None,
+        stt_temperature=settings.temperature if mode != "reference" else None,
+        stt_vad_filter=settings.vad_filter if mode != "reference" else False,
     )
     if transcription is not None:
         speech = score_transcript(case.instruction, transcription.text)
@@ -190,17 +202,33 @@ def summarize(rows: Sequence[EvaluationRow]) -> dict[str, float | int]:
 
 
 async def evaluate_audio(
-    cases_path: Path,
+    cases_path: Path | None,
     settings: TranscriptionSettings,
     *,
     mode: Mode = "pipeline",
     attempts: int = 1,
     output_directory: Path = PROJECT_ROOT / "reports",
     allow_submission: bool = False,
+    dataset_path: Path | None = None,
 ) -> tuple[dict[str, float | int], tuple[Path, Path]]:
     if attempts <= 0:
         raise ValueError("attempts deve ser maior que zero")
-    cases = load_audio_cases(cases_path)
+    if dataset_path is not None:
+        if mode != "stt":
+            raise ValueError(
+                "O metadata.csv do dataset permite avaliar STT, mas não contém o oráculo "
+                "expected_json necessário para os modos reference/pipeline."
+            )
+        cases, missing_recordings, source_path = load_dataset_audio_cases(dataset_path)
+        print(
+            f"Dataset: {len(cases)} áudio(s) encontrado(s); "
+            f"{len(missing_recordings)} entrada(s) sem gravação ignorada(s)."
+        )
+    else:
+        if cases_path is None:
+            raise ValueError("Informe --cases ou --dataset")
+        cases = load_audio_cases(cases_path)
+        source_path = cases_path
     audio = AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine())
     rows: list[EvaluationRow] = []
     for case in cases:
@@ -213,7 +241,7 @@ async def evaluate_audio(
                 manifest = metadata(
                     model=application.config if application else None,
                     browser=browser,
-                    case_file=cases_path,
+                    case_file=source_path,
                     audio_file=case.audio_file,
                     stt_settings=settings.to_dict() if mode != "reference" else None,
                     max_turns=application.agent.max_turns if application else None,
@@ -249,7 +277,8 @@ async def evaluate_audio(
                 if application:
                     await application.close()
     summary = summarize(rows)
-    stamp = f"{mode}_{datetime.now(UTC).strftime('%Y-%m-%d_%H-%M-%S-%f')}"
+    model_slug = re.sub(r"[^A-Za-z0-9._-]+", "-", settings.model).strip("-") or "model"
+    stamp = f"{mode}_{model_slug}_{datetime.now(UTC).strftime('%Y-%m-%d_%H-%M-%S-%f')}"
     paths = write_reports(summary, rows, stamp, output_directory)
     print(f"Relatório HTML: {paths[0]}\nPlanilha CSV: {paths[1]}")
     return summary, paths
@@ -259,8 +288,12 @@ def main(argv: Sequence[str] | None = None, *, default_mode: Mode = "pipeline") 
     parser = argparse.ArgumentParser(
         description="Avalia STT, texto de referência ou pipeline pelo mesmo catálogo."
     )
-    parser.add_argument(
-        "--cases", type=Path, default=PROJECT_ROOT / "evaluation/audio/cases.example.csv"
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--cases", type=Path)
+    source.add_argument(
+        "--dataset",
+        type=Path,
+        help="Diretório com metadata.csv e gravações, ou caminho para o metadata.csv.",
     )
     parser.add_argument("--mode", choices=("stt", "reference", "pipeline"), default=default_mode)
     parser.add_argument("--attempts", type=int, default=1)
@@ -272,15 +305,19 @@ def main(argv: Sequence[str] | None = None, *, default_mode: Mode = "pipeline") 
     )
     add_transcription_arguments(parser)
     args = parser.parse_args(argv)
+    cases_path = args.cases
+    if cases_path is None and args.dataset is None:
+        cases_path = PROJECT_ROOT / "evaluation/audio/cases.example.csv"
     try:
         asyncio.run(
             evaluate_audio(
-                args.cases,
+                cases_path,
                 settings_from_arguments(args),
                 mode=args.mode,
                 attempts=args.attempts,
                 output_directory=args.output,
                 allow_submission=args.allow_submission,
+                dataset_path=args.dataset,
             )
         )
         return 0

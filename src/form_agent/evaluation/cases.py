@@ -19,6 +19,8 @@ FIELD_MAP = {
     "acceptTerms": "Aceito os termos",
 }
 REQUIRED_COLUMNS = {"id", "instruction", "submitted", "unmatched"}
+DATASET_REQUIRED_COLUMNS = {"id", "speaker", "file", "category", "transcription"}
+DATASET_AUDIO_EXTENSIONS = frozenset({".wav", ".mp3", ".mp4", ".m4a", ".flac"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,3 +151,72 @@ def load_audio_cases(path: Path) -> list[EvaluationCase]:
             )
         )
     return cases
+
+
+def load_dataset_audio_cases(
+    dataset_path: Path,
+) -> tuple[list[EvaluationCase], tuple[str, ...], Path]:
+    """Load STT cases from a dataset metadata.csv and resolve recorded audio by stem.
+
+    The metadata may retain the planned WAV filename while recordings use another
+    supported container, such as MP4. Missing recordings are returned to the caller
+    instead of becoming artificial STT failures.
+    """
+
+    dataset_path = dataset_path.expanduser().resolve()
+    metadata_path = dataset_path if dataset_path.is_file() else dataset_path / "metadata.csv"
+    dataset_directory = metadata_path.parent
+    try:
+        with metadata_path.open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            if missing := DATASET_REQUIRED_COLUMNS - set(reader.fieldnames or []):
+                raise ValueError(f"Colunas do dataset ausentes: {', '.join(sorted(missing))}")
+            rows = list(reader)
+    except FileNotFoundError as exc:
+        raise ValueError(f"metadata.csv do dataset não encontrado: {metadata_path}") from exc
+
+    if not rows:
+        raise ValueError("O metadata.csv do dataset não contém casos")
+
+    audio_by_stem: dict[str, list[Path]] = {}
+    for candidate in dataset_directory.rglob("*"):
+        if candidate.is_file() and candidate.suffix.lower() in DATASET_AUDIO_EXTENSIONS:
+            audio_by_stem.setdefault(candidate.stem.casefold(), []).append(candidate.resolve())
+
+    ids: set[str] = set()
+    cases: list[EvaluationCase] = []
+    missing_recordings: list[str] = []
+    for line, row in enumerate(rows, 2):
+        case_id = (row.get("id") or "").strip()
+        declared_file = (row.get("file") or "").strip()
+        reference = (row.get("transcription") or "").strip()
+        if not case_id or not declared_file or not reference:
+            raise ValueError(f"id/file/transcription ausente na linha {line}")
+        if case_id in ids:
+            raise ValueError(f"id duplicado no dataset: {case_id}")
+        ids.add(case_id)
+
+        candidates = audio_by_stem.get(Path(declared_file).stem.casefold(), [])
+        if not candidates:
+            missing_recordings.append(declared_file)
+            continue
+        if len(candidates) > 1:
+            paths = ", ".join(str(candidate) for candidate in candidates)
+            raise ValueError(f"Mais de um áudio corresponde a {declared_file}: {paths}")
+
+        cases.append(
+            EvaluationCase(
+                id=case_id,
+                instruction=reference,
+                expected={},
+                submitted=False,
+                unmatched=False,
+                audio_file=candidates[0],
+                speaker=(row.get("speaker") or "").strip(),
+                scenario=(row.get("category") or "").strip(),
+            )
+        )
+
+    if not cases:
+        raise ValueError(f"Nenhuma gravação do metadata.csv foi encontrada em {dataset_directory}")
+    return cases, tuple(missing_recordings), metadata_path

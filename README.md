@@ -5,6 +5,9 @@ formulários web com um agente baseado em LLM. Mantém interfaces independentes 
 STT e ferramentas, MCP local por stdio e Playwright encapsulado. O áudio pode ser usado
 isoladamente ou composto com o Form Agent.
 
+Consulte a [referência completa de comandos](docs/comandos.md) para instalação, execução,
+avaliação do dataset, parâmetros do Whisper, testes e geração de relatórios.
+
 ## Instalação
 
 Requer Python 3.12+, Chromium do Playwright e credenciais de um provider compatível para
@@ -64,7 +67,7 @@ mutuamente exclusivos. Recursos são fechados ao terminar a CLI de voz.
 Ambos os comandos de áudio aceitam `--model`, `--language`, `--device cpu|cuda`,
 `--compute-type`, `--beam-size`, `--temperature` e `--vad-filter`. Padrões: small, idioma
 por detecção, CPU/int8, beam size 5, temperatura 0, VAD desativado. O adaptador usa PyAV
-para decodificar WAV/MP3/M4A/FLAC; a preparação não aplica limpeza ou correção automática.
+para decodificar WAV/MP3/MP4/M4A/FLAC; a preparação não aplica limpeza ou correção automática.
 
 ## Avaliação
 
@@ -96,6 +99,21 @@ pipeline-evaluate-py --cases evaluation/audio/cases.csv --mode reference --attem
 # C: áudio → STT → Form Agent → navegador
 pipeline-evaluate-py --cases evaluation/audio/cases.csv --mode pipeline --language pt --attempts 3
 ```
+
+Para um dataset externo com `metadata.csv` nas colunas
+`id,speaker,file,category,transcription`, use o diretório diretamente. O nome-base em `file`
+é associado à gravação encontrada mesmo que o catálogo declare WAV e o arquivo seja MP4.
+Entradas ainda sem gravação são informadas e ignoradas:
+
+```bash
+audio-evaluate-py --dataset ../dataset --attempts 3 --language pt \
+  --model small --device cpu --compute-type int8
+```
+
+Troque `--model` por `base`, `small` ou `medium`. Esse catálogo mede STT (WER, CER, latência
+e RTF); os parâmetros do Whisper ficam registrados em cada linha e o modelo aparece no nome
+do relatório. Para `reference`/`pipeline`, use `--cases` com o formato completo, incluindo
+`expected_json`, pois a transcrição sozinha não define o estado esperado do formulário.
 
 `--allow-submission` exige também `submission_authorized=true` no caso. A coluna
 `submitted` é a expectativa do avaliador, independente da permissão. Sem a flag, casos
@@ -192,6 +210,7 @@ examples/                # formulário base e fixture adversarial nativa
 
 - [Auditoria inicial e plano incremental](docs/auditoria-inicial.md)
 - [Arquitetura, agência, métricas e metodologia](docs/experimentos.md)
+- [Referência completa de comandos](docs/comandos.md)
 - [43 cenários de formulário e 20 condições de áudio](docs/cenarios-adversariais.md)
 - [Dataset proposto e protocolo de coleta](evaluation/audio/README.md)
 - [Auditoria final e validação](docs/auditoria-final.md)

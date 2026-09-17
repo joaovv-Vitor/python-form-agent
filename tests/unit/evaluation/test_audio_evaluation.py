@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from audio_agent.models import TranscriptionSettings
-from form_agent.evaluation.cases import load_audio_cases
+from form_agent.evaluation.cases import load_audio_cases, load_dataset_audio_cases
 from form_agent.evaluation.metrics import EvaluationRow
 from voice_form.evaluation import evaluate_audio, summarize
 
@@ -38,6 +38,55 @@ def test_catalogue_paths_and_authority_are_independent(tmp_path):
     assert not case.submission_authorized
 
 
+def test_dataset_catalogue_resolves_recording_by_stem_and_skips_missing(tmp_path):
+    dataset = tmp_path / "dataset"
+    speaker = dataset / "speaker_02"
+    speaker.mkdir(parents=True)
+    recording = speaker / "spk02_01_common.mp4"
+    recording.write_bytes(b"audio")
+    metadata = dataset / "metadata.csv"
+    metadata.write_text(
+        "id,speaker,file,category,transcription\n"
+        '1,spk02,spk02_01_common.wav,common,"Meu nome é Ana."\n'
+        '2,spk01,spk01_01_common.wav,common,"Meu nome é Bia."\n',
+        encoding="utf-8",
+    )
+
+    cases, missing, source = load_dataset_audio_cases(dataset)
+
+    assert source == metadata
+    assert missing == ("spk01_01_common.wav",)
+    assert len(cases) == 1
+    assert cases[0].id == "1"
+    assert cases[0].audio_file == recording
+    assert cases[0].instruction == "Meu nome é Ana."
+    assert cases[0].speaker == "spk02"
+    assert cases[0].scenario == "common"
+
+
+def test_dataset_catalogue_rejects_pipeline_without_form_oracle(tmp_path):
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "sample.mp4").write_bytes(b"audio")
+    (dataset / "metadata.csv").write_text(
+        "id,speaker,file,category,transcription\n1,spk01,sample.wav,common,Teste\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="expected_json"):
+        import asyncio
+
+        asyncio.run(
+            evaluate_audio(
+                None,
+                TranscriptionSettings(),
+                mode="pipeline",
+                dataset_path=dataset,
+                output_directory=tmp_path / "reports",
+            )
+        )
+
+
 @pytest.mark.parametrize("payload", ["[]", '{"Nome": ["Ana"]}', '{"Nome": null}'])
 def test_catalogue_rejects_unusable_expected_values(tmp_path, payload):
     with pytest.raises(ValueError):
@@ -61,6 +110,41 @@ async def test_stt_mode_does_not_construct_llm_or_browser_and_reports_missing_au
     assert summary["transcribed_attempts"] == 0
     assert "micro_wer" not in summary
     assert "STT_ERROR" in paths[0].read_text()
+
+
+async def test_stt_report_records_transcription_settings(tmp_path, monkeypatch):
+    from audio_agent.models import EngineTranscription
+
+    class Speech:
+        def transcribe(self, audio, settings):
+            return EngineTranscription("scripted", "1", "Meu nome é Ana", "pt", 1.0, 1.0, ())
+
+    monkeypatch.setattr("voice_form.evaluation.FasterWhisperSpeechToTextEngine", lambda: Speech())
+    path = catalogue(tmp_path)
+    (tmp_path / "audio").mkdir()
+    (tmp_path / "audio/a.wav").write_bytes(b"audio")
+    settings = TranscriptionSettings(
+        model="base",
+        language="pt",
+        device="cpu",
+        compute_type="int8",
+        beam_size=3,
+        temperature=0.2,
+        vad_filter=True,
+    )
+
+    _, paths = await evaluate_audio(
+        path,
+        settings,
+        mode="stt",
+        output_directory=tmp_path / "reports",
+    )
+
+    assert "stt_base_" in paths[0].name
+    report = paths[1].read_text(encoding="utf-8-sig")
+    assert "stt_model" in report
+    assert "base" in report
+    assert "int8" in report
 
 
 def test_positive_wer_and_functional_success_are_separate():
