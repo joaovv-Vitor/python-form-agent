@@ -163,6 +163,15 @@ preencher. Use formulários controlados no experimento. [Modelo de ameaça e aut
 
 ## Rastreabilidade e reprodução
 
+Cada execução salva os valores observados em `form_data.json`, em uma pasta com seu run ID:
+`reports/manual/<run_id>/` para uso da CLI ou do áudio e `reports/tests/<run_id>/` para
+avaliações. O arquivo inclui os campos alterados (`filled_fields`), o estado final dos
+campos (`form_fields`), a instrução, a transcrição quando houver e, nas avaliações,
+os dados esperados e obtidos. O caminho do JSONL correspondente fica em `trace_path`.
+Se uma execução parar antes da inspeção final, os campos escritos com sucesso até esse
+ponto ainda são registrados. O parâmetro `--output` das avaliações muda a pasta base;
+`--trace-directory` da CLI de voz salva `manual/` ao lado da pasta de rastros escolhida.
+
 Cada JSONL em `reports/runs/` tem run ID, sequência, timestamps UTC, eventos e manifesto.
 Registra versão/hash do código e prompt, parâmetros, dependências, provider, configurações
 STT, hashes do CSV/áudio/formulário local e resultados. A chave da API é excluída. Traces

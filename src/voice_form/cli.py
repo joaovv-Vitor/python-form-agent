@@ -33,7 +33,11 @@ async def run(arguments: argparse.Namespace) -> int:
             stt_settings=settings.to_dict(),
             max_turns=application.agent.max_turns,
         )
-        with RunTrace(arguments.trace_directory, manifest) as trace:
+        with RunTrace(
+            arguments.trace_directory,
+            manifest,
+            data_directory=arguments.trace_directory.parent / "manual",
+        ) as trace:
             application.agent.events = trace.emit
             pipeline = AudioFormPipeline(
                 AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine()),

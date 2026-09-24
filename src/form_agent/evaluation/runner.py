@@ -165,7 +165,11 @@ async def evaluate(
                         "allow_submission": allow_submission,
                     }
                 )
-                with RunTrace(output_directory / "runs", manifest) as trace:
+                with RunTrace(
+                    output_directory / "runs",
+                    manifest,
+                    data_directory=output_directory / "tests",
+                ) as trace:
                     application.agent.events = trace.emit
                     authorized = allow_submission and case.submission_authorized
                     started = time.perf_counter()

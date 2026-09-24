@@ -51,6 +51,7 @@ async def run_cli() -> None:
                             browser=load_browser_config(),
                             max_turns=application.agent.max_turns,
                         ),
+                        data_directory=PROJECT_ROOT / "reports/manual",
                     ) as trace:
                         application.agent.events = trace.emit
                         result = await application.agent.run(instruction)

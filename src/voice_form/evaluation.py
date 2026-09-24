@@ -256,7 +256,11 @@ async def evaluate_audio(
                         "stt_model_cache": "shared_per_invocation",
                     }
                 )
-                with RunTrace(output_directory / "runs", manifest) as trace:
+                with RunTrace(
+                    output_directory / "runs",
+                    manifest,
+                    data_directory=output_directory / "tests",
+                ) as trace:
                     if application:
                         application.agent.events = trace.emit
                     row = await run_audio_attempt(
