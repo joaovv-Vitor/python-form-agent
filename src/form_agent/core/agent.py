@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Mapping
 
 from .errors import error_code
 from .events import EventSink, discard_event
@@ -11,6 +12,7 @@ from .schemas import (
     FilledField,
     FormInspection,
     JsonObject,
+    JsonValue,
     RunIssue,
     ToolCall,
     ToolCompletion,
@@ -57,13 +59,24 @@ class FormAgent:
         self.max_turns = max_turns
         self.events = events
 
-    async def run(self, instruction: str, *, authorize_submission: bool = False) -> AgentResult:
+    async def run(
+        self,
+        instruction: str,
+        *,
+        authorize_submission: bool = False,
+        field_values: Mapping[str, JsonValue] | None = None,
+    ) -> AgentResult:
         instruction = instruction.strip()
         if not instruction:
             raise ValueError("A instrução não pode ser vazia")
         can_submit = authorize_submission is True and not submission_denied(instruction)
         self.events(
-            "form_started", {"instruction": instruction, "submission_authorized": can_submit}
+            "form_started",
+            {
+                "instruction": instruction,
+                "submission_authorized": can_submit,
+                "validated_field_values": dict(field_values) if field_values is not None else None,
+            },
         )
         definitions = [tool for tool in await self.tools.list_tools() if tool.name in ALLOWED_TOOLS]
         inspection = await self.tools.inspect_form()
@@ -104,6 +117,15 @@ class FormAgent:
                         "code": "TOOL_ERROR",
                         "error": "Tool não permitida",
                     }
+                elif call.name == "fill_field" and field_values is not None:
+                    if not self._permitted_fill(call, inspection, field_values):
+                        output = {
+                            "success": False,
+                            "code": "DATA_BLOCKED",
+                            "error": "Campo ou valor fora do plano validado pelo host",
+                        }
+                    else:
+                        output = await self._safe_call(call.name, call.arguments)
                 elif call.name == "click_button":
                     if not can_submit:
                         output = {
@@ -120,6 +142,10 @@ class FormAgent:
                     else:
                         verification_complete = await self._verify(filled, issues)
                         final_inspection = await self.tools.inspect_form()
+                        verification_complete = (
+                            self._verify_plan(final_inspection, field_values, issues)
+                            and verification_complete
+                        )
                         if not verification_complete:
                             output = {
                                 "success": False,
@@ -152,6 +178,10 @@ class FormAgent:
             verification_complete = await self._verify(filled, issues)
             try:
                 final_inspection = await self.tools.inspect_form()
+                verification_complete = (
+                    self._verify_plan(final_inspection, field_values, issues)
+                    and verification_complete
+                )
             except Exception as exc:
                 verification_complete = False
                 issues.append(RunIssue(error_code(exc), "verification", str(exc)))
@@ -181,6 +211,52 @@ class FormAgent:
             submission_authorized=can_submit,
             verification_complete=verification_complete,
         )
+
+    @staticmethod
+    def _permitted_fill(
+        call: ToolCall, inspection: FormInspection, values: Mapping[str, JsonValue]
+    ) -> bool:
+        query = call.arguments.get("field")
+        if not isinstance(query, str):
+            return False
+        matches = [
+            f
+            for f in inspection.fields
+            if _normalize(query)
+            in {_normalize(s) for s in (f.reference, f.label, f.name or "", f.id or "") if s}
+        ]
+        if len(matches) != 1 or matches[0].reference not in values:
+            return False
+        field = matches[0]
+        expected = values[field.reference]
+        proposed = call.arguments.get("value")
+        if isinstance(expected, bool):
+            return proposed == ("true" if expected else "false")
+        if field.type == "select":
+            return proposed == expected or any(
+                o.value == expected and o.label == proposed for o in field.options
+            )
+        return proposed == expected
+
+    @staticmethod
+    def _verify_plan(
+        inspection: FormInspection, values: Mapping[str, JsonValue] | None, issues: list[RunIssue]
+    ) -> bool:
+        if values is None:
+            return True
+        observed = {f.reference: f.value for f in inspection.fields}
+        missing = [
+            ref for ref, value in values.items() if ref not in observed or observed[ref] != value
+        ]
+        if missing:
+            issues.append(
+                RunIssue(
+                    "EXTRACTION_APPLY_ERROR",
+                    "verification",
+                    "Plano validado não confirmado: " + ", ".join(missing),
+                )
+            )
+        return not missing
 
     async def submit(
         self, result: AgentResult, button: str, *, authorized: bool = False

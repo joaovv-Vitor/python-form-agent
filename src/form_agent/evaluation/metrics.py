@@ -54,9 +54,23 @@ class EvaluationRow:
     stt_beam_size: int | None = None
     stt_temperature: float | None = None
     stt_vad_filter: bool = False
+    stt_initial_prompt: str | None = None
+    stt_hotwords: str | None = None
     submission_attempted: bool = False
     submission_authorized: bool = False
     submitted: bool = False
+    normalized_instruction: str | None = None
+    data_normalization_version: str | None = None
+    normalization_seconds: float | None = None
+    data_treatment: str = ""
+    pair_id: str = ""
+    condition_order: int | None = None
+    extraction_seconds: float | None = None
+    extraction_version: str | None = None
+    extraction_prompt_tokens: int | None = None
+    extraction_completion_tokens: int | None = None
+    pending_fields: tuple[str, ...] = ()
+    post_stt_seconds: float | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> EvaluationRow:

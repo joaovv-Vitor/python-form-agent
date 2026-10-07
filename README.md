@@ -8,6 +8,20 @@ isoladamente ou composto com o Form Agent.
 Consulte a [referência completa de comandos](docs/comandos.md) para instalação, execução,
 avaliação do dataset, parâmetros do Whisper, testes e geração de relatórios.
 
+Para demonstrar o caso perfeito, a configuração selecionada no piloto foi
+`sample_01` + Whisper `large-v3` + `--email-hints` + regras locais. Ela preencheu
+todos os campos esperados nas duas execuções observadas:
+
+```bash
+HF_HUB_CACHE=reports/model-cache .venv/bin/python -m voice_form.cli \
+  ../Dataset/caso_perfeito/samples/sample_01/audio.m4a \
+  --model large-v3 --language pt --email-hints --data-treatment rules
+```
+
+Executa uma única condição de preenchimento. O áudio é um artefato local, não
+versionado; ajuste o caminho se seu dataset estiver em outra pasta. Veja o
+[caso perfeito, resultados e limites do piloto](docs/caso-perfeito.md).
+
 ## Instalação
 
 Requer Python 3.12+, Chromium do Playwright e credenciais de um provider compatível para
@@ -59,13 +73,46 @@ voice-form-agent-py samples/exemplo.wav --language pt --confirm-submit
 python -m voice_form.cli samples/exemplo.wav --language pt
 ```
 
-A transcrição original é encaminhada ao FormAgent. Falha STT ou texto vazio impedem o
-preenchimento. Sem `--confirm-submit`, a CLI de voz não pede envio. Essa opção solicita
+Para acompanhar o preenchimento no navegador, desative o modo headless. A opção
+`--confirm-submit` mantém a janela aberta enquanto a revisão aguarda no terminal; pressione
+Enter para encerrar sem enviar ou digite exatamente `ENVIAR` para autorizar a submissão:
+
+```bash
+HEADLESS=false voice-form-agent-py \
+  ../dataset/speaker_02/spk02_06_form.mp4 \
+  --language pt \
+  --model small \
+  --device cpu \
+  --compute-type int8 \
+  --confirm-submit
+```
+
+A transcrição original é preservada; o FormAgent recebe por padrão o texto tratado por
+regras explícitas de e-mail, telefone brasileiro e data em português. Valores incertos
+geram `DATA_PENDING`, são marcados para revisão e bloqueiam o envio. Use
+`--no-normalize-data` para comparar com o fluxo de transcrição bruta. Veja as
+[regras e limites do tratamento](docs/tratamento-dados-falados.md).
+
+Para a terceira condição, use `--data-treatment deepseek`: Whisper transcreve,
+DeepSeek extrai campos com evidências e pendências, e o código valida os formatos.
+O FormAgent só pode preencher os valores aprovados, usando o MCP local existente.
+Compare as três condições com a mesma transcrição por tentativa:
+
+```bash
+python -m voice_form.evaluation --cases reports/caso_perfeito/cases.csv \
+  --mode pipeline --compare-treatments --language pt --model small \
+  --attempts 3 --output reports/comparacao-tratamentos
+```
+
+Veja o [protocolo, configuração e interpretação dos resultados](docs/comparacao-tratamentos.md).
+
+Falha STT ou texto vazio impedem o preenchimento. Sem `--confirm-submit`, a CLI de voz não pede envio. Essa opção solicita
 confirmação humana; não concede autorização ao LLM. `--json` e `--confirm-submit` são
 mutuamente exclusivos. Recursos são fechados ao terminar a CLI de voz.
 
 Ambos os comandos de áudio aceitam `--model`, `--language`, `--device cpu|cuda`,
-`--compute-type`, `--beam-size`, `--temperature` e `--vad-filter`. Padrões: small, idioma
+`--compute-type`, `--beam-size`, `--temperature`, `--vad-filter`, `--email-hints`,
+`--initial-prompt` e `--hotwords`. Padrões: small, idioma
 por detecção, CPU/int8, beam size 5, temperatura 0, VAD desativado. O adaptador usa PyAV
 para decodificar WAV/MP3/MP4/M4A/FLAC; a preparação não aplica limpeza ou correção automática.
 
@@ -98,6 +145,8 @@ pipeline-evaluate-py --cases evaluation/audio/cases.csv --mode reference --attem
 
 # C: áudio → STT → Form Agent → navegador
 pipeline-evaluate-py --cases evaluation/audio/cases.csv --mode pipeline --language pt --attempts 3
+# Comparação sem tratamento (grave em outra pasta):
+pipeline-evaluate-py --cases evaluation/audio/cases.csv --mode pipeline --language pt --attempts 3 --no-normalize-data --output reports/pipeline-bruto
 ```
 
 Para um dataset externo com `metadata.csv` nas colunas
@@ -110,7 +159,29 @@ audio-evaluate-py --dataset ../dataset --attempts 3 --language pt \
   --model small --device cpu --compute-type int8
 ```
 
-Troque `--model` por `base`, `small` ou `medium`. Esse catálogo mede STT (WER, CER, latência
+Para avaliar somente uma pessoa quando os áudios estão separados por pasta, crie nessa
+pasta um `metadata.csv` com apenas as linhas do falante. Por exemplo, para `spk02`:
+
+```bash
+awk -F, 'NR == 1 || $2 == "spk02"' \
+  ../dataset/metadata.csv \
+  > ../dataset/speaker_02/metadata.csv
+
+audio-evaluate-py \
+  --dataset ../dataset/speaker_02 \
+  --attempts 1 \
+  --language pt \
+  --model small \
+  --device cpu \
+  --compute-type int8 \
+  --output reports/speaker_02
+```
+
+A pasta informada em `--dataset` precisa conter o `metadata.csv`; uma pasta apenas com
+gravações não é suficiente para calcular WER e CER. O identificador da coluna `speaker`
+(`spk02`, no exemplo) pode ser diferente do nome da pasta (`speaker_02`).
+
+Troque `--model` por `base`, `small`, `medium` ou `large-v3`. Esse catálogo mede STT (WER, CER, latência
 e RTF); os parâmetros do Whisper ficam registrados em cada linha e o modelo aparece no nome
 do relatório. Para `reference`/`pipeline`, use `--cases` com o formato completo, incluindo
 `expected_json`, pois a transcrição sozinha não define o estado esperado do formulário.
@@ -146,6 +217,10 @@ das métricas](docs/experimentos.md), inclusive denominadores, silêncio e anál
 | LLM_TIMEOUT_SECONDS | Timeout do provider | 60 |
 | LLM_TEMPERATURE | Temperatura opcional, quando suportada | omitida, padrão do provider |
 | FORM_PROMPT_VERSION | Prompt empacotado | `form-agent-v2` |
+| EXTRACTION_API_KEY | Credencial opcional do extrator DeepSeek | `DEEPSEEK_API_KEY` |
+| EXTRACTION_MODEL / EXTRACTION_BASE_URL | Modelo/endpoint do extrator, independentes de `LLM_*` | perfil `deepseek` |
+| EXTRACTION_TIMEOUT_SECONDS | Timeout da extração | 60 |
+| EXTRACTION_TEMPERATURE | Temperatura da extração | 0 |
 | FORM_URL | Formulário de destino | exemplo local |
 | HEADLESS | Navegador sem janela | true |
 | BROWSER_TIMEOUT_MS | Timeout de automação | 30000 |
@@ -166,8 +241,12 @@ preencher. Use formulários controlados no experimento. [Modelo de ameaça e aut
 Cada execução salva os valores observados em `form_data.json`, em uma pasta com seu run ID:
 `reports/manual/<run_id>/` para uso da CLI ou do áudio e `reports/tests/<run_id>/` para
 avaliações. O arquivo inclui os campos alterados (`filled_fields`), o estado final dos
-campos (`form_fields`), a instrução, a transcrição quando houver e, nas avaliações,
+campos (`form_fields`), a instrução, a transcrição quando houver, o tratamento de dados
+(`data_normalization`, com trechos originais, regras, valores e pendências) e, nas avaliações,
 os dados esperados e obtidos. O caminho do JSONL correspondente fica em `trace_path`.
+Na condição `deepseek`, `data_extraction` conserva resposta JSON, candidatos,
+valores aprovados, evidências e pendências. Nas comparações, `pair_id` relaciona as
+três condições à mesma transcrição e o manifesto registra sua ordem.
 Se uma execução parar antes da inspeção final, os campos escritos com sucesso até esse
 ponto ainda são registrados. O parâmetro `--output` das avaliações muda a pasta base;
 `--trace-directory` da CLI de voz salva `manual/` ao lado da pasta de rastros escolhida.
@@ -220,6 +299,9 @@ examples/                # formulário base e fixture adversarial nativa
 - [Auditoria inicial e plano incremental](docs/auditoria-inicial.md)
 - [Arquitetura, agência, métricas e metodologia](docs/experimentos.md)
 - [Referência completa de comandos](docs/comandos.md)
+- [Caso perfeito e configuração selecionada no piloto](docs/caso-perfeito.md)
+- [Tratamento de e-mail, telefone e data](docs/tratamento-dados-falados.md)
+- [Comparação pareada de raw, rules e DeepSeek](docs/comparacao-tratamentos.md)
 - [43 cenários de formulário e 20 condições de áudio](docs/cenarios-adversariais.md)
 - [Dataset proposto e protocolo de coleta](evaluation/audio/README.md)
 - [Auditoria final e validação](docs/auditoria-final.md)

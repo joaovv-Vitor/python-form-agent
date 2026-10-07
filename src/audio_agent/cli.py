@@ -15,6 +15,11 @@ from .models import TranscriptionResult, TranscriptionSettings
 from .preprocessing import AudioPreprocessor
 
 LOGGER = logging.getLogger(__name__)
+EMAIL_INITIAL_PROMPT = (
+    "Nome completo. Meu e-mail é contato@example.com. Meu telefone. "
+    "Minha data de nascimento. Minha cidade. Meu estado."
+)
+EMAIL_HOTWORDS = "e-mail arroba @ ponto . gmail.com outlook.com hotmail.com yahoo.com"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -41,6 +46,14 @@ def add_transcription_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--beam-size", type=int, default=5)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--vad-filter", action="store_true")
+    prompt = parser.add_mutually_exclusive_group()
+    prompt.add_argument("--initial-prompt", help="Contexto opcional para a transcrição Whisper.")
+    prompt.add_argument(
+        "--email-hints",
+        action="store_true",
+        help="Orienta o Whisper com vocabulário e exemplo genérico de e-mail, sem usar o oráculo.",
+    )
+    parser.add_argument("--hotwords", help="Vocabulário opcional para orientar o Whisper.")
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -51,6 +64,7 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def settings_from_arguments(arguments: argparse.Namespace) -> TranscriptionSettings:
+    email_hints = getattr(arguments, "email_hints", False)
     return TranscriptionSettings(
         model=arguments.model,
         language=arguments.language,
@@ -59,6 +73,10 @@ def settings_from_arguments(arguments: argparse.Namespace) -> TranscriptionSetti
         beam_size=arguments.beam_size,
         temperature=arguments.temperature,
         vad_filter=arguments.vad_filter,
+        initial_prompt=EMAIL_INITIAL_PROMPT
+        if email_hints
+        else getattr(arguments, "initial_prompt", None),
+        hotwords=getattr(arguments, "hotwords", None) or (EMAIL_HOTWORDS if email_hints else None),
     )
 
 

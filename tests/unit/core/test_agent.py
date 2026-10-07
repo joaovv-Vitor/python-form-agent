@@ -71,6 +71,42 @@ class FakeModel:
         return None
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"field": "fullName", "value": "Maria"},
+        {"field": "unknown", "value": "João"},
+        {"field": "fullName", "value": "João"},
+    ],
+)
+async def test_host_plan_blocks_unapproved_fields_and_values(arguments):
+    tools = FakeTools()
+    model = FakeModel([[ToolCall("1", "fill_field", arguments)], []])
+    # Empty plan must prohibit all writes, even when the value looks reasonable.
+    result = await FormAgent(tools, model).run("Dados validados: {}", field_values={})
+    assert not any(name == "fill_field" for name, _ in tools.calls)
+    assert result.issues[0].code == "DATA_BLOCKED"
+
+
+async def test_omitted_validated_fields_fail_plan_verification():
+    result = await FormAgent(FakeTools(), FakeModel([[]])).run(
+        "Preencha João", field_values={"fullName": "João"}
+    )
+    assert not result.verification_complete
+    assert result.issues[0].code == "EXTRACTION_APPLY_ERROR"
+
+
+async def test_wrong_candidate_is_blocked_even_for_an_allowed_field():
+    tools = FakeTools()
+    result = await FormAgent(
+        tools,
+        FakeModel([[ToolCall("1", "fill_field", {"field": "fullName", "value": "Maria"})], []]),
+    ).run("Preencha João", field_values={"fullName": "João"})
+    assert not any(name == "fill_field" for name, _ in tools.calls)
+    assert not result.verification_complete
+    assert {issue.code for issue in result.issues} == {"DATA_BLOCKED", "EXTRACTION_APPLY_ERROR"}
+
+
 @pytest.mark.asyncio
 async def test_fills_and_confirms_field():
     tools = FakeTools()

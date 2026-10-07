@@ -11,7 +11,13 @@ flowchart LR
     STT --> W[faster-whisper]
     W --> TR[TranscriptionResult]
     TR --> P
-    P --> F
+    P --> C{Tratamento selecionado}
+    C -->|raw| F
+    C -->|rules| N[Regras locais pt-BR]
+    N --> F
+    C -->|deepseek| D[Inspeção de campos e extração por API]
+    D --> V[Validação local: evidência, formatos e pendências]
+    V --> F
     F <--> L[LanguageModel / adaptador OpenAI compatível]
     F --> TC[ToolClient / BrowserToolsClient]
     TC <--> MCP[MCP local: JSON-RPC por stdio]
@@ -39,6 +45,13 @@ Cada tentativa com formulário recebe Application, processo MCP e navegador novo
 A preparação atual valida o arquivo, sem denoising, resampling ou correção de transcrição.
 Decodificação pertence ao adaptador faster-whisper. Preservar o texto bruto é necessário
 para medir WER; correções humanas, se usadas, devem ser uma condição experimental separada.
+No pipeline, uma etapa local trata a representação de e-mails, telefones e datas,
+preservando a transcrição original. As [regras e limites](tratamento-dados-falados.md)
+são versionados; `--no-normalize-data` reproduz o encaminhamento bruto anterior.
+`--data-treatment` seleciona `raw`, `rules` ou `deepseek`; a última condição
+acrescenta extração por API e restringe escritas ao plano validado. O MCP local
+continua responsável pelas ferramentas de navegador. O
+[protocolo de comparação](comparacao-tratamentos.md) detalha a transcrição compartilhada.
 
 ## Agência e nomenclatura
 
@@ -51,8 +64,9 @@ possui um ciclo percepção–decisão–ação, com escolhas de ferramentas pel
 do navegador. É defensável descrevê-lo como agente baseado em LLM com autonomia limitada
 por permissões e orçamento de turnos. Não demonstra cooperação social entre agentes.
 AudioAgent executa etapas predeterminadas e não escolhe metas ou ações sobre o ambiente;
-é mais precisamente um componente/pipeline STT. A composição acrescenta encadeamento,
-não negociação, coordenação autônoma ou um segundo decisor. Portanto, o código não fornece
+é mais precisamente um componente/pipeline STT. A extração opcional usa um LLM para
+propor dados, mas não dispõe de ferramentas nem de um ciclo autônomo de ação.
+A composição acrescenta encadeamento, sem negociação ou coordenação autônoma. O código não fornece
 base forte para afirmar um sistema multiagente no sentido dessa literatura. Classes,
 comandos e nome de projeto foram preservados; recomenda-se explicar essa distinção no TCC.
 
@@ -124,7 +138,7 @@ permanece fora do escopo. React/Vue/Angular não são incompatíveis por nome: o
 |---|---|---|---|
 | A `stt` | Não executa FormAgent | WER/CER, processamento, RTF, falhas STT | Qualidade de preenchimento |
 | B `reference` / avaliação textual | Texto humano de referência | Campos, efeitos extras, envio, F1, estabilidade, latência | Robustez ao reconhecimento de fala |
-| C `pipeline` | Transcrição bruta | STT + resultado funcional integrado | Causa definitiva de cada erro sem análise complementar |
+| C `pipeline` | Texto tratado; bruto com `--no-normalize-data` | STT + tratamento + resultado funcional integrado | Causa definitiva de cada erro sem análise complementar |
 
 B e C podem usar o mesmo `case_id` do catálogo de áudio, permitindo pareamento por caso,
 configuração e tentativa. Não há paralelismo entre tentativas, nem cache de respostas do LLM.
@@ -194,6 +208,10 @@ mostra diretamente quando uma diferença linguística é tolerada.
 |---|---|
 | INPUT_ERROR | Referência vazia no modo B (não aciona FormAgent) |
 | STT_ERROR / STT_EMPTY | Falha de preparação/inferência; ou ausência de texto no pipeline |
+| DATA_PENDING | Tratamento ou extração encontrou valor incerto, inválido ou repetição conflitante |
+| EXTRACTION_ERROR | Resposta estruturada inválida, vazia ou interrompida |
+| DATA_BLOCKED | Escrita solicitada fora do plano validado pelo host |
+| EXTRACTION_APPLY_ERROR | Plano aprovado não confirmado no estado final do formulário |
 | PROVIDER_ERROR | Autenticação, conexão, timeout do provider ou resposta LLM inutilizável |
 | FIELD_NOT_FOUND / FIELD_AMBIGUOUS | Resolução de campo/opção sem correspondência ou com empate |
 | TOOL_ERROR | Tool desconhecida, contrato inválido ou falha de transporte não mais específica |
@@ -253,6 +271,11 @@ benefício ou se uma funcionalidade MCP adicional se tornar necessária ao TCC.
 
 ## Próximos experimentos e validade
 
+A comparação pareada dos tratamentos `raw`, `rules` e `deepseek` está disponível
+por `--compare-treatments`. Consulte o [protocolo específico](comparacao-tratamentos.md)
+para os controles, métricas e limites desta comparação; ela é distinta dos modos
+STT/referência/pipeline descritos acima.
+
 Hipóteses agora testáveis: (H1) WER positivo nem sempre implica falha funcional; (H2) entidades
 como e-mails/telefones são mais sensíveis que acentos em cidades; (H3) correções explícitas
 melhoram o oráculo final, mas podem degradar STT; (H4) prompt v2 reduz escritas extras/ambiguidades;
@@ -278,7 +301,10 @@ sucesso funcional depende do oráculo e do conjunto de controles observáveis. I
 é um proxy de aceite da aplicação. Precisão não mede segurança sozinha. Nomenclatura multiagente
 não deve ser tratada como variável comprovada pela quantidade de módulos.
 
-**Limitações metodológicas:** sem resultados empíricos reais nesta implementação; os testes de
-fluxo usam STT/LLM simulados. Ainda faltam gravações, protocolo institucional de coleta,
-revisão independente das referências e oráculos, avaliação com provedores reais e incerteza
-estatística por falante/caso. Nenhum percentual de desempenho humano foi inferido dos testes.
+**Limitações metodológicas:** o [piloto do caso perfeito](caso-perfeito.md) inclui
+execuções com áudio, Whisper, provider e navegador reais. A amostra 01 passou com
+regras e extração nas duas rodadas observadas, mas esse resultado não estima
+desempenho geral. Os testes automatizados de fluxo continuam usando STT/LLM
+simulados. Ainda faltam referências e oráculos revisados independentemente,
+corpus mais amplo, protocolo institucional de coleta e incerteza estatística
+por falante/caso. Nenhum percentual de desempenho humano foi inferido dos testes.

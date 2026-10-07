@@ -130,6 +130,8 @@ class RunTrace:
         self._data_directory = data_directory
         self._instruction: str | None = None
         self._transcription: str | None = None
+        self._data_normalization: dict[str, object] | None = None
+        self._data_extraction: dict[str, object] | None = None
         self._initial_fields: list[dict[str, object]] = []
         self._final_fields: list[dict[str, object]] = []
         self._written_fields: dict[str, object] = {}
@@ -161,6 +163,10 @@ class RunTrace:
             self._instruction = str(data.get("instruction", ""))
         elif name == "audio_transcribed":
             self._transcription = str(data.get("text", ""))
+        elif name == "data_normalized":
+            self._data_normalization = dict(data)
+        elif name == "data_extracted":
+            self._data_extraction = dict(data)
         elif name == "form_inspected":
             fields = data.get("fields")
             if isinstance(fields, list):
@@ -177,7 +183,9 @@ class RunTrace:
                 self._form_url = str(inspection.get("url", ""))
                 fields = inspection.get("fields")
                 if isinstance(fields, list):
-                    self._final_fields = [dict(field) for field in fields if isinstance(field, dict)]
+                    self._final_fields = [
+                        dict(field) for field in fields if isinstance(field, dict)
+                    ]
             complete = data.get("verification_complete")
             self._verification_complete = complete if isinstance(complete, bool) else None
             submitted = data.get("submitted")
@@ -206,7 +214,15 @@ class RunTrace:
             current = dict(filled)
         evaluation = {
             key: self._completed[key]
-            for key in ("id", "attempt", "mode", "passed", "expected_data", "returned_data", "error_codes")
+            for key in (
+                "id",
+                "attempt",
+                "mode",
+                "passed",
+                "expected_data",
+                "returned_data",
+                "error_codes",
+            )
             if key in self._completed
         }
         human_submission = self._completed.get("human_submission")
@@ -218,6 +234,8 @@ class RunTrace:
             "trace_path": str(self.path),
             "instruction": self._instruction or self._completed.get("instruction"),
             "transcription": self._transcription,
+            "data_normalization": self._data_normalization,
+            "data_extraction": self._data_extraction,
             "form_url": self._form_url,
             "filled_fields": filled,
             "form_fields": current,

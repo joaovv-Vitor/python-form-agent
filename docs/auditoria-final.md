@@ -1,5 +1,11 @@
 # Auditoria final
 
+Registro histórico da etapa de integração de áudio descrita abaixo. A evolução
+posterior, com tratamento de dados, comparação DeepSeek e piloto real, está
+documentada no [protocolo atual](experimentos.md), na
+[comparação dos tratamentos](comparacao-tratamentos.md) e no
+[caso perfeito](caso-perfeito.md).
+
 Base: `abe8f52a3cfa7c2cc56084328be5b5f155f002d9`. Alterações mantidas na árvore de trabalho,
 sem commits automáticos. A [auditoria inicial](auditoria-inicial.md) registra achados antes
  das modificações e o plano; esta revisão descreve o resultado entregue.

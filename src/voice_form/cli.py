@@ -19,13 +19,18 @@ from form_agent.core.agent import submission_denied
 from form_agent.core.errors import FormAgentError
 from form_agent.experiments import RunTrace, metadata
 
+from .extraction import create_extractor
+from .normalization import DATA_NORMALIZATION_VERSION
 from .pipeline import AudioFormPipeline
 
 
 async def run(arguments: argparse.Namespace) -> int:
     settings = settings_from_arguments(arguments)
     application = create_application()
+    extractor = None
     try:
+        if arguments.data_treatment == "deepseek":
+            extractor = create_extractor()
         manifest = metadata(
             model=application.config,
             browser=load_browser_config(),
@@ -33,6 +38,11 @@ async def run(arguments: argparse.Namespace) -> int:
             stt_settings=settings.to_dict(),
             max_turns=application.agent.max_turns,
         )
+        manifest["data_normalization_version"] = (
+            DATA_NORMALIZATION_VERSION if arguments.data_treatment == "rules" else None
+        )
+        manifest["data_treatment"] = arguments.data_treatment
+        manifest["extraction"] = extractor.manifest() if extractor else None
         with RunTrace(
             arguments.trace_directory,
             manifest,
@@ -43,8 +53,11 @@ async def run(arguments: argparse.Namespace) -> int:
                 AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine()),
                 application.agent,
                 events=trace.emit,
+                extractor=extractor,
             )
-            result = await pipeline.run(arguments.audio_file, settings)
+            result = await pipeline.run(
+                arguments.audio_file, settings, data_treatment=arguments.data_treatment
+            )
             if arguments.json:
                 print(
                     json.dumps(
@@ -56,11 +69,32 @@ async def run(arguments: argparse.Namespace) -> int:
             else:
                 if result.transcription:
                     print(f"Transcrição: {result.transcription.text}")
+                if (
+                    result.normalization
+                    and result.transcription
+                    and result.normalization.instruction != result.transcription.text
+                ):
+                    print(f"Texto tratado: {result.normalization.instruction}")
+                if result.extraction:
+                    print(
+                        "Dados extraídos: "
+                        + json.dumps(result.extraction.values, ensure_ascii=False)
+                    )
+                for issue in result.issues:
+                    if issue.code == "DATA_PENDING":
+                        print(f"Pendente: {issue.message}")
                 if result.form:
                     print(result.form.message)
                 else:
                     print("; ".join(f"{issue.code}: {issue.message}" for issue in result.issues))
             if arguments.confirm_submit and result.form and result.transcription:
+                if any(issue.code == "DATA_PENDING" for issue in result.issues):
+                    trace.emit(
+                        "run_completed",
+                        {**result.to_dict(), "human_submission": "pending_data"},
+                    )
+                    print("Revise os dados pendentes antes de solicitar o envio.")
+                    return 2
                 if submission_denied(result.transcription.text):
                     trace.emit(
                         "run_completed",
@@ -83,7 +117,9 @@ async def run(arguments: argparse.Namespace) -> int:
                 else 2
             )
     finally:
-        await application.close()
+        await asyncio.gather(
+            application.close(), *([extractor.close()] if extractor else []), return_exceptions=True
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -93,6 +129,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("audio_file", type=Path)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--trace-directory", type=Path, default=PROJECT_ROOT / "reports/runs")
+    treatment = parser.add_mutually_exclusive_group()
+    treatment.add_argument(
+        "--no-normalize-data",
+        dest="data_treatment",
+        action="store_const",
+        const="raw",
+        help="Encaminha a transcrição bruta, para comparação com o tratamento de dados.",
+    )
+    treatment.add_argument(
+        "--data-treatment",
+        choices=("raw", "rules", "deepseek"),
+        default="rules",
+        help="Etapa entre STT e formulário (padrão: rules).",
+    )
+    parser.set_defaults(data_treatment="rules")
     parser.add_argument(
         "--confirm-submit",
         action="store_true",

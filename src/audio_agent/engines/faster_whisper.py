@@ -60,6 +60,8 @@ class FasterWhisperSpeechToTextEngine:
                 temperature=settings.temperature,
                 vad_filter=settings.vad_filter,
                 word_timestamps=False,
+                initial_prompt=settings.initial_prompt,
+                hotwords=settings.hotwords,
             )
             segments = tuple(
                 TranscriptionSegment(

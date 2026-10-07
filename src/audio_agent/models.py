@@ -19,6 +19,8 @@ class TranscriptionSettings:
     beam_size: int = 5
     temperature: float = 0.0
     vad_filter: bool = False
+    initial_prompt: str | None = None
+    hotwords: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip():

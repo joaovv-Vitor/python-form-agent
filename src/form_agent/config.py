@@ -93,12 +93,16 @@ def load_model_config(
     *,
     env_file: Path | None = DEFAULT_ENV_FILE,
     profiles_file: Path | None = None,
+    profile_name: str | None = None,
+    variable_prefix: str = "LLM",
 ) -> ModelConfig:
     _load_environment(env_file)
     path = profiles_file or Path(os.getenv("MODEL_PROFILES_FILE", str(DEFAULT_PROFILES_FILE)))
     data = _read_profiles(path)
-    profile_name = os.getenv("MODEL_PROFILE") or _required_text(
-        data.get("defaultProfile"), "defaultProfile"
+    profile_name = (
+        profile_name
+        or os.getenv("MODEL_PROFILE")
+        or _required_text(data.get("defaultProfile"), "defaultProfile")
     )
     profiles = data["profiles"]
     profile = profiles.get(profile_name)
@@ -109,33 +113,35 @@ def load_model_config(
         )
 
     provider = _required_text(profile.get("provider"), f"profiles.{profile_name}.provider")
-    model = os.getenv("LLM_MODEL") or _required_text(
+    model = os.getenv(f"{variable_prefix}_MODEL") or _required_text(
         profile.get("model"), f"profiles.{profile_name}.model"
     )
     api_key_env = _required_text(profile.get("apiKeyEnv"), f"profiles.{profile_name}.apiKeyEnv")
-    api_key = (os.getenv("LLM_API_KEY") or os.getenv(api_key_env) or "").strip()
+    api_key = (os.getenv(f"{variable_prefix}_API_KEY") or os.getenv(api_key_env) or "").strip()
     if not api_key:
         raise ConfigurationError(
-            f"Chave ausente: defina {api_key_env} ou LLM_API_KEY no arquivo .env."
+            f"Chave ausente: defina {api_key_env} ou {variable_prefix}_API_KEY no arquivo .env."
         )
     if api_key.lower() in API_KEY_PLACEHOLDERS:
         raise ConfigurationError(
             f"Substitua o valor de exemplo de {api_key_env} por uma chave válida no arquivo .env."
         )
 
-    configured_base_url = os.getenv("LLM_BASE_URL")
+    configured_base_url = os.getenv(f"{variable_prefix}_BASE_URL")
     profile_base_url = profile.get("baseURL")
     base_url = configured_base_url or (str(profile_base_url).strip() if profile_base_url else None)
-    timeout = _positive_float(os.getenv("LLM_TIMEOUT_SECONDS", "60"), "LLM_TIMEOUT_SECONDS")
-    temperature_raw = os.getenv("LLM_TEMPERATURE")
+    timeout_variable = f"{variable_prefix}_TIMEOUT_SECONDS"
+    timeout = _positive_float(os.getenv(timeout_variable, "60"), timeout_variable)
+    temperature_variable = f"{variable_prefix}_TEMPERATURE"
+    temperature_raw = os.getenv(temperature_variable)
     temperature = None
     if temperature_raw:
         try:
             temperature = float(temperature_raw)
         except ValueError as exc:
-            raise ConfigurationError("LLM_TEMPERATURE deve ser um número.") from exc
+            raise ConfigurationError(f"{temperature_variable} deve ser um número.") from exc
         if not math.isfinite(temperature) or not 0 <= temperature <= 2:
-            raise ConfigurationError("LLM_TEMPERATURE deve estar entre 0 e 2.")
+            raise ConfigurationError(f"{temperature_variable} deve estar entre 0 e 2.")
     return ModelConfig(
         profile=profile_name,
         provider=provider,

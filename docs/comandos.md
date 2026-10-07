@@ -88,7 +88,25 @@ audio-agent-py caminho/para/audio.mp4 --language pt --model small --verbose
 
 ## Preenchimento de formulário por áudio
 
-Executa áudio → Whisper → Form Agent → navegador:
+Para rodar somente a configuração selecionada no caso perfeito:
+
+```bash
+HF_HUB_CACHE=reports/model-cache .venv/bin/python -m voice_form.cli \
+  ../Dataset/caso_perfeito/samples/sample_01/audio.m4a \
+  --model large-v3 --language pt --email-hints --data-treatment rules
+```
+
+Esse comando executa uma transcrição e um preenchimento, sem rodar o lote de
+comparação. Continua usando o agente de formulário e o MCP local. As regras
+tratam o e-mail, telefone e data; não há chamada adicional ao extrator DeepSeek.
+O modelo do agente de formulário continua definido pelo `.env`. Para acompanhar
+o navegador, acrescente `HEADLESS=false` antes de `.venv/bin/python`.
+
+O caminho de áudio e o cache são locais e não versionados. Se o modelo não estiver
+nesse cache, o primeiro uso o baixa. Consulte os
+[resultados e requisitos do caso perfeito](caso-perfeito.md).
+
+Executa áudio → Whisper → tratamento de dados → Form Agent → navegador:
 
 ```bash
 voice-form-agent-py caminho/para/audio.mp4 \
@@ -109,6 +127,41 @@ Para produzir JSON:
 ```bash
 voice-form-agent-py caminho/para/audio.mp4 --language pt --model small --json
 ```
+
+O tratamento de e-mail, telefone e data é habilitado por padrão. O JSON conserva a
+transcrição original e inclui `normalization`, com valores tratados e pendências.
+Para comparar com o fluxo bruto:
+
+```bash
+voice-form-agent-py caminho/para/audio.mp4 --language pt --json --no-normalize-data
+```
+
+Consulte as [regras e limites](tratamento-dados-falados.md). `DATA_PENDING` retorna
+código 2 e impede envio; os demais campos podem ser preenchidos.
+
+Para usar extração estruturada pelo DeepSeek, com validação local antes do MCP:
+
+```bash
+python -m voice_form.cli caminho/para/audio.m4a \
+  --language pt --model small --data-treatment deepseek --json
+```
+
+`--data-treatment raw|rules|deepseek` seleciona uma condição; `--no-normalize-data`
+é um alias de `raw`. A extração usa `DEEPSEEK_API_KEY` e as opções `EXTRACTION_*`,
+independentes de `LLM_*`. O JSON inclui `extraction`, com a resposta original,
+valores candidatos, valores validados, trechos de origem e pendências.
+
+Para comparar todas as condições com uma única transcrição por caso/tentativa:
+
+```bash
+python -m voice_form.evaluation --cases reports/caso_perfeito/cases.csv \
+  --mode pipeline --compare-treatments --language pt --model small \
+  --attempts 3 --output reports/comparacao-tratamentos
+```
+
+O [protocolo de comparação](comparacao-tratamentos.md) explica as métricas e os
+controles. `--compare-treatments` exige um catálogo com `expected_json`; não pode
+ser combinado com `--dataset` ou `--data-treatment`.
 
 Para solicitar confirmação humana antes de um possível envio:
 
@@ -143,21 +196,46 @@ aceitam as opções abaixo.
 | `--beam-size N` | `5` | Quantidade de hipóteses mantidas durante a decodificação. |
 | `--temperature VALUE` | `0.0` | Temperatura da decodificação. |
 | `--vad-filter` | desativado | Remove trechos classificados como silêncio antes da transcrição. |
+| `--email-hints` | desativado | Contexto e vocabulário genéricos para preservar separadores de e-mail no Whisper. |
+| `--initial-prompt TEXT` | ausente | Contexto personalizado; não pode ser combinado com `--email-hints`. |
+| `--hotwords TEXT` | ausente | Vocabulário personalizado; substitui o vocabulário do preset quando informado. |
+
+Para investigar e-mails que perderam o `@`, repita o caso perfeito com orientação
+de transcrição, usando o modelo já baixado no projeto:
+
+```bash
+HF_HUB_CACHE=reports/model-cache python -m voice_form.evaluation \
+  --cases reports/caso_perfeito/cases.csv --compare-treatments \
+  --model large-v3 --language pt --email-hints \
+  --output reports/comparacao-email-hints
+```
+
+O preset não contém o endereço esperado e não consulta o oráculo. Ele orienta o
+Whisper com um exemplo `contato@example.com` e vocabulário de separadores/domínios.
+As orientações alteram a condição STT: registre essa rodada separadamente. O
+prompt e as palavras são registrados no manifesto, no JSON e nas colunas
+`stt_initial_prompt`/`stt_hotwords` do CSV. A orientação pode ajudar, mas não garante
+o e-mail: separadores ausentes e grafias inválidas continuam pendentes.
 
 No Mac M1 Pro, use `--device cpu --compute-type int8`. O projeto não oferece `mps` como
 dispositivo. Os modelos são baixados automaticamente e ficam no cache local.
 
-Comandos recomendados para comparar os três modelos instalados:
+Comandos para comparar configurações STT:
 
 ```bash
 audio-agent-py caminho/para/audio.mp4 --language pt --model base --device cpu --compute-type int8
 audio-agent-py caminho/para/audio.mp4 --language pt --model small --device cpu --compute-type int8
 audio-agent-py caminho/para/audio.mp4 --language pt --model medium --device cpu --compute-type int8
+audio-agent-py caminho/para/audio.mp4 --language pt --model large-v3 --device cpu --compute-type int8 --email-hints
 ```
 
 - `base`: referência rápida, com menor custo de processamento.
-- `small`: configuração principal recomendada para o projeto.
+- `small`: configuração padrão, útil como linha de base rápida.
 - `medium`: maior prioridade para precisão, com execução mais lenta.
+- `large-v3` com `--email-hints`: configuração selecionada para o piloto do caso perfeito.
+
+O último comando também muda as orientações de transcrição. Para isolar o efeito
+do tamanho do modelo, mantenha `--email-hints` igual nas configurações comparadas.
 
 ## Avaliação do Form Agent por texto
 
@@ -276,7 +354,7 @@ pipeline-evaluate-py \
   --attempts 3
 ```
 
-Modo C, áudio → Whisper → Form Agent → navegador:
+Modo C, áudio → Whisper → tratamento de dados → Form Agent → navegador:
 
 ```bash
 pipeline-evaluate-py \
@@ -288,6 +366,10 @@ pipeline-evaluate-py \
   --device cpu \
   --compute-type int8
 ```
+
+Acrescente `--no-normalize-data` ao modo `pipeline` para executar a condição bruta,
+salvando cada condição em uma pasta `--output` diferente. WER/CER usam sempre a
+transcrição original; os modos `stt` e `reference` não recebem tratamento.
 
 Para permitir submissões previstas pelo catálogo:
 

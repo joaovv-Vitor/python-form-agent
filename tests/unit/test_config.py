@@ -47,6 +47,23 @@ def test_rejects_unknown_profile(monkeypatch, profiles_file):
         load_model_config(env_file=None, profiles_file=profiles_file)
 
 
+def test_extraction_configuration_is_independent_of_form_model(monkeypatch, profiles_file):
+    monkeypatch.setenv("TEST_API_KEY", "secret-value")
+    monkeypatch.setenv("MODEL_PROFILE", "another-provider")
+    monkeypatch.setenv("LLM_MODEL", "form-model")
+    monkeypatch.setenv("LLM_BASE_URL", "https://other.example")
+    monkeypatch.setenv("EXTRACTION_MODEL", "extraction-model")
+    config = load_model_config(
+        env_file=None,
+        profiles_file=profiles_file,
+        profile_name="test",
+        variable_prefix="EXTRACTION",
+    )
+    assert config.profile == "test"
+    assert config.model == "extraction-model"
+    assert config.base_url is None
+
+
 def test_browser_and_agent_settings(monkeypatch):
     monkeypatch.setenv("HEADLESS", "não")
     monkeypatch.setenv("AGENT_MAX_TURNS", "5")
