@@ -93,6 +93,21 @@ geram `DATA_PENDING`, são marcados para revisão e bloqueiam o envio. Use
 `--no-normalize-data` para comparar com o fluxo de transcrição bruta. Veja as
 [regras e limites do tratamento](docs/tratamento-dados-falados.md).
 
+Para resolver e-mails e telefones pendentes com respostas digitadas no terminal:
+
+```bash
+voice-form-agent-py samples/exemplo.wav --language pt --clarify
+# Com revisão e confirmação separada de envio:
+voice-form-agent-py samples/exemplo.wav --language pt --clarify --confirm-submit
+```
+
+O sistema faz uma pergunta por vez, aceita até duas respostas por campo e permite
+`PULAR` ou `ENCERRAR`. Também solicita e-mail/telefone obrigatório ausente ou inválido.
+Campos opcionais não mencionados permanecem vazios. As respostas passam pelas regras
+locais e pela conferência no navegador, na mesma sessão, sem retranscrever o áudio.
+O modo interativo é opcional e incompatível com `--json`; avaliações em lote continuam
+sem perguntas. Veja o [fluxo, critérios e limites do esclarecimento](docs/esclarecimento-usuario.md).
+
 Para a terceira condição, use `--data-treatment deepseek`: Whisper transcreve,
 DeepSeek extrai campos com evidências e pendências, e o código valida os formatos.
 O FormAgent só pode preencher os valores aprovados, usando o MCP local existente.
@@ -301,6 +316,7 @@ examples/                # formulário base e fixture adversarial nativa
 - [Referência completa de comandos](docs/comandos.md)
 - [Caso perfeito e configuração selecionada no piloto](docs/caso-perfeito.md)
 - [Tratamento de e-mail, telefone e data](docs/tratamento-dados-falados.md)
+- [Esclarecimento de pendências com o usuário](docs/esclarecimento-usuario.md)
 - [Comparação pareada de raw, rules e DeepSeek](docs/comparacao-tratamentos.md)
 - [43 cenários de formulário e 20 condições de áudio](docs/cenarios-adversariais.md)
 - [Dataset proposto e protocolo de coleta](evaluation/audio/README.md)

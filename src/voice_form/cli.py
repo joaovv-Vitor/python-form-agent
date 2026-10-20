@@ -19,6 +19,7 @@ from form_agent.core.agent import submission_denied
 from form_agent.core.errors import FormAgentError
 from form_agent.experiments import RunTrace, metadata
 
+from .clarification import ClarificationSession
 from .extraction import create_extractor
 from .normalization import DATA_NORMALIZATION_VERSION
 from .pipeline import AudioFormPipeline
@@ -43,6 +44,7 @@ async def run(arguments: argparse.Namespace) -> int:
         )
         manifest["data_treatment"] = arguments.data_treatment
         manifest["extraction"] = extractor.manifest() if extractor else None
+        manifest["clarification"] = {"enabled": arguments.clarify, "max_attempts": 2}
         with RunTrace(
             arguments.trace_directory,
             manifest,
@@ -54,6 +56,9 @@ async def run(arguments: argparse.Namespace) -> int:
                 application.agent,
                 events=trace.emit,
                 extractor=extractor,
+                clarification=ClarificationSession(events=trace.emit)
+                if arguments.clarify
+                else None,
             )
             result = await pipeline.run(
                 arguments.audio_file, settings, data_treatment=arguments.data_treatment
@@ -128,6 +133,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("audio_file", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--clarify",
+        action="store_true",
+        help="Pergunta pelo terminal sobre e-mails/telefones pendentes (até duas tentativas por campo).",
+    )
     parser.add_argument("--trace-directory", type=Path, default=PROJECT_ROOT / "reports/runs")
     treatment = parser.add_mutually_exclusive_group()
     treatment.add_argument(
@@ -153,6 +163,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     if arguments.json and arguments.confirm_submit:
         parser.error("--json e --confirm-submit não podem ser combinados")
+    if arguments.json and arguments.clarify:
+        parser.error("--json e --clarify não podem ser combinados")
     try:
         return asyncio.run(run(arguments))
     except (FormAgentError, ValueError) as exc:

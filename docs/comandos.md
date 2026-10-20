@@ -88,6 +88,23 @@ audio-agent-py caminho/para/audio.mp4 --language pt --model small --verbose
 
 ## Preenchimento de formulário por áudio
 
+Para permitir esclarecimentos pelo terminal durante o fluxo:
+
+```bash
+voice-form-agent-py caminho/para/audio.mp4 --language pt --clarify
+# Com extração e revisão de envio:
+voice-form-agent-py caminho/para/audio.mp4 --language pt \
+  --data-treatment deepseek --clarify --confirm-submit
+```
+
+`--clarify` solicita e-mails/telefones incompletos, conflitantes, inválidos ou
+obrigatórios ausentes. Digite o valor completo, `PULAR` para manter a pendência
+ou `ENCERRAR` para parar as perguntas. Há até duas tentativas por campo. Quando
+houver mais de um campo possível, escolha primeiro o número ou identificador do
+campo mostrado. Uma resposta inválida é explicada antes de uma nova tentativa.
+O esclarecimento não autoriza envio e não pode ser combinado com `--json`.
+Consulte o [protocolo de esclarecimento](esclarecimento-usuario.md).
+
 Para rodar somente a configuração selecionada no caso perfeito:
 
 ```bash

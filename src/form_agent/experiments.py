@@ -132,6 +132,7 @@ class RunTrace:
         self._transcription: str | None = None
         self._data_normalization: dict[str, object] | None = None
         self._data_extraction: dict[str, object] | None = None
+        self._clarifications: list[dict[str, object]] = []
         self._initial_fields: list[dict[str, object]] = []
         self._final_fields: list[dict[str, object]] = []
         self._written_fields: dict[str, object] = {}
@@ -177,7 +178,9 @@ class RunTrace:
                 reference = output.get("field_ref") or output.get("field")
                 if reference is not None:
                     self._written_fields[str(reference)] = output.get("value")
-        elif name == "form_completed":
+        elif name == "clarification_record":
+            self._clarifications.append(dict(data))
+        elif name in {"form_completed", "clarification_completed"}:
             inspection = data.get("final_inspection")
             if isinstance(inspection, dict):
                 self._form_url = str(inspection.get("url", ""))
@@ -236,6 +239,8 @@ class RunTrace:
             "transcription": self._transcription,
             "data_normalization": self._data_normalization,
             "data_extraction": self._data_extraction,
+            "clarifications": self._clarifications,
+            "initial_issues": self._completed.get("initial_issues"),
             "form_url": self._form_url,
             "filled_fields": filled,
             "form_fields": current,

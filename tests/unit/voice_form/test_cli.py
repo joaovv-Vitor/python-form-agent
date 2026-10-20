@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,8 @@ from voice_form import cli
 
 
 def application(monkeypatch, text, inventory=None):
+    observed = inventory or FormInspection("file:///form")
+
     class Speech:
         def transcribe(self, audio, settings):
             return EngineTranscription("scripted", "1", text, "pt", 1.0, 1.0, ())
@@ -33,9 +36,28 @@ def application(monkeypatch, text, inventory=None):
     )
 
     async def inspect():
-        return inventory or FormInspection("file:///form")
+        return observed
 
-    app.agent.tools = SimpleNamespace(inspect_form=inspect)
+    async def call_tool(name, arguments):
+        nonlocal observed
+        assert name == "fill_field"
+        observed = replace(
+            observed,
+            fields=tuple(
+                replace(f, value=arguments["value"], valid=True)
+                if f.reference == arguments["field"]
+                else f
+                for f in observed.fields
+            ),
+        )
+        return {
+            "success": True,
+            "field": arguments["field"],
+            "field_ref": arguments["field"],
+            "value": arguments["value"],
+        }
+
+    app.agent.tools = SimpleNamespace(inspect_form=inspect, call_tool=call_tool)
     monkeypatch.setattr(cli, "create_application", lambda: app)
     monkeypatch.setattr(cli, "load_browser_config", lambda: BrowserConfig("file:///form"))
     monkeypatch.setattr(cli, "FasterWhisperSpeechToTextEngine", Speech)
@@ -128,3 +150,65 @@ def test_cli_does_not_offer_submission_with_pending_values(tmp_path, monkeypatch
     )
     assert "Revise os dados pendentes" in capsys.readouterr().out
     assert closed == [True]
+
+
+def test_cli_rejects_json_with_interactive_clarification(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["audio.wav", "--json", "--clarify"])
+    assert exc.value.code == 2
+    assert "--json e --clarify" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "answer,denied,expected",
+    [
+        ("ana@example.com", False, 0),
+        ("PULAR", False, 2),
+        ("ana@example.com", True, 2),
+    ],
+)
+def test_cli_clarification_precedes_submission_and_preserves_original_veto(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    answer,
+    denied,
+    expected,
+):
+    inventory = FormInspection(
+        "file:///form", (FormField("E-mail", "email", "email", "email", "textbox", value=""),)
+    )
+    text = "E-mail: incompleto. " + ("Não envie." if denied else "Pode enviar.")
+    closed = application(monkeypatch, text, inventory)
+    monkeypatch.setattr("builtins.input", lambda _: answer)
+    confirmed = []
+
+    async def confirm(app, result):
+        confirmed.append(result)
+        assert result.final_inspection.fields[0].value == "ana@example.com"
+        assert not result.submission_authorized
+        return {"submitted": True}
+
+    monkeypatch.setattr(cli, "confirm_submission", confirm)
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    assert (
+        cli.main(
+            [
+                str(path),
+                "--clarify",
+                "--confirm-submit",
+                "--trace-directory",
+                str(tmp_path / "runs"),
+            ]
+        )
+        == expected
+    )
+    capsys.readouterr()
+    assert bool(confirmed) == (expected == 0)
+    assert closed == [True]
+    data_file = next((tmp_path / "manual").glob("*/form_data.json"))
+    data = json.loads(data_file.read_text())
+    assert data["transcription"] == text
+    assert data["initial_issues"][0]["code"] == "DATA_PENDING"
+    assert data["clarifications"][0]["status"] == ("skipped" if answer == "PULAR" else "resolved")

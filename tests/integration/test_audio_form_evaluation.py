@@ -253,3 +253,74 @@ async def test_spoken_values_are_treated_before_real_browser_and_wer_uses_raw_te
         assert "data_normalized" in trace.path.read_text()
     finally:
         await application.close()
+
+
+async def test_clarification_updates_real_browser_preserves_fields_and_records_history(tmp_path):
+    import json
+
+    from voice_form.clarification import ClarificationSession
+    from voice_form.pipeline import AudioFormPipeline
+
+    text = "Meu nome é Ana. E-mail: incompleto. Pode enviar."
+    transcriptions = []
+
+    class Speech:
+        def transcribe(self, audio, settings):
+            transcriptions.append(audio)
+            return EngineTranscription("scripted", "1", text, "pt", 1.0, 2.0, ())
+
+    class Model(ScriptedModel):
+        def create_session(self, instruction, inspection, tools):
+            assert "click_button" not in {tool.name for tool in tools}
+            self.batches = iter(
+                [
+                    [ToolCall("fill", "fill_field", {"field": "fullName", "value": "Ana"})],
+                    [],
+                ]
+            )
+            return self
+
+    prompts = []
+
+    async def ask(question):
+        prompts.append(question)
+        return "ana@example.com"
+
+    path = tmp_path / "spoken.wav"
+    path.write_bytes(b"scripted STT input")
+    browser = BrowserConfig((PROJECT_ROOT / "examples/test-form/index.html").as_uri())
+    client, model = BrowserToolsClient(browser_config=browser), Model()
+    agent = FormAgent(client, model)
+    try:
+        with RunTrace(tmp_path / "runs", {}, data_directory=tmp_path / "manual") as trace:
+            agent.events = trace.emit
+            pipeline = AudioFormPipeline(
+                AudioAgent(AudioPreprocessor(), Speech()),
+                agent,
+                events=trace.emit,
+                clarification=ClarificationSession(ask, notify=lambda _: None, events=trace.emit),
+            )
+            result = await pipeline.run(path, TranscriptionSettings(), authorize_submission=True)
+            trace.emit("run_completed", result.to_dict())
+        assert len(transcriptions) == len(prompts) == 1
+        assert result.issues == ()
+        assert result.initial_issues[0].code == "DATA_PENDING"
+        assert result.clarifications[0].status == "resolved"
+        assert result.normalization.fields[0].status == "pending"
+        assert result.form.verification_complete
+        assert not result.form.submission_authorized
+        assert not result.form.submission_attempted
+        current = await client.inspect_form()
+        assert current == result.form.final_inspection
+        values = {f.reference: f.value for f in current.fields}
+        assert values["fullName"] == "Ana"
+        assert values["email"] == "ana@example.com"
+        data = json.loads((tmp_path / "manual" / trace.run_id / "form_data.json").read_text())
+        assert data["form_fields"]["email"] == "ana@example.com"
+        assert data["filled_fields"] == {"fullName": "Ana", "email": "ana@example.com"}
+        assert data["clarifications"][0]["value"] == "ana@example.com"
+        assert data["data_normalization"]["fields"][0]["status"] == "pending"
+        assert data["verification_complete"] is True
+        assert data["transcription"] == text
+    finally:
+        await client.close()

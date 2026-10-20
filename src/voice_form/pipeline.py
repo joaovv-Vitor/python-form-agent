@@ -21,6 +21,7 @@ from form_agent.core.errors import (
 from form_agent.core.events import EventSink, discard_event
 from form_agent.core.schemas import AgentResult, RunIssue
 
+from .clarification import ClarificationRecord, ClarificationSession
 from .extraction import DataExtractor, ExtractionResponseError, ExtractionResult
 from .normalization import NormalizationResult, normalize_spoken_data
 
@@ -46,6 +47,9 @@ class PipelineResult:
     extraction_seconds: float = 0.0
     data_treatment: DataTreatment = "raw"
     post_stt_seconds: float = 0.0
+    clarifications: tuple[ClarificationRecord, ...] = ()
+    clarification_seconds: float = 0.0
+    initial_issues: tuple[RunIssue, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -60,6 +64,9 @@ class PipelineResult:
             "extraction_seconds": self.extraction_seconds,
             "data_treatment": self.data_treatment,
             "post_stt_seconds": self.post_stt_seconds,
+            "clarifications": [asdict(item) for item in self.clarifications],
+            "clarification_seconds": self.clarification_seconds,
+            "initial_issues": [asdict(issue) for issue in self.initial_issues],
         }
 
 
@@ -71,11 +78,13 @@ class AudioFormPipeline:
         *,
         events: EventSink = discard_event,
         extractor: DataExtractor | None = None,
+        clarification: ClarificationSession | None = None,
     ) -> None:
         self.audio = audio
         self.form = form
         self.events = events
         self.extractor = extractor
+        self.clarification = clarification
 
     async def run(
         self,
@@ -190,7 +199,10 @@ class AudioFormPipeline:
         # Treatment must never remove an original veto or allow submission with
         # unresolved values. Authority remains external to both STT and treatment.
         can_submit = (
-            authorize_submission and not issues and not submission_denied(transcription.text)
+            authorize_submission
+            and self.clarification is None
+            and not issues
+            and not submission_denied(transcription.text)
         )
         form_started = time.perf_counter()
         try:
@@ -214,6 +226,24 @@ class AudioFormPipeline:
                 condition,
                 time.perf_counter() - started,
             )
+        form_seconds = time.perf_counter() - form_started
+        initial_issues = (*issues, *form.issues)
+        final_issues = initial_issues
+        clarifications: tuple[ClarificationRecord, ...] = ()
+        clarification_seconds = 0.0
+        if self.clarification:
+            clarification_started = time.perf_counter()
+            clarified = await self.clarification.run(
+                self.form.tools,
+                form,
+                initial_issues,
+                normalization=normalization,
+                extraction=extraction,
+            )
+            form = clarified.form
+            final_issues = clarified.issues
+            clarifications = clarified.records
+            clarification_seconds = time.perf_counter() - clarification_started
         self.events(
             "pipeline_completed",
             {
@@ -227,13 +257,16 @@ class AudioFormPipeline:
         return PipelineResult(
             transcription,
             form,
-            (*issues, *form.issues),
+            final_issues,
             transcription.processing_time_seconds + time.perf_counter() - started,
-            time.perf_counter() - form_started,
+            form_seconds,
             normalization,
             normalization_seconds,
             extraction,
             extraction_seconds,
             condition,
             time.perf_counter() - started,
+            clarifications,
+            clarification_seconds,
+            initial_issues if self.clarification else (),
         )
