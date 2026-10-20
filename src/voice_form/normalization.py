@@ -12,9 +12,12 @@ from dataclasses import asdict, dataclass, replace
 from datetime import date
 from typing import Literal
 
+import phonenumbers
+from text_to_num import alpha2digit  # type: ignore[import-untyped]
+
 from form_agent.core.schemas import RunIssue
 
-DATA_NORMALIZATION_VERSION = "spoken-data-pt-BR-v2"
+DATA_NORMALIZATION_VERSION = "spoken-data-pt-BR-v3"
 type FieldKind = Literal["email", "phone", "date"]
 
 # A connector is required so ordinary mentions ("não preencha o telefone")
@@ -36,21 +39,6 @@ _BOUNDARY = re.compile(
     r"(?<!\S)(?:envie|enviar|submeta|submeter|mande|mandar)(?=\s|$|[.!?;](?=\s|$))",
     re.IGNORECASE,
 )
-_DIGITS = {
-    "zero": "0",
-    "um": "1",
-    "uma": "1",
-    "dois": "2",
-    "duas": "2",
-    "tres": "3",
-    "quatro": "4",
-    "cinco": "5",
-    "seis": "6",
-    "meia": "6",
-    "sete": "7",
-    "oito": "8",
-    "nove": "9",
-}
 _MONTHS = {
     "janeiro": 1,
     "fevereiro": 2,
@@ -183,18 +171,21 @@ def _email(raw: str) -> tuple[str | None, tuple[str, ...], str | None]:
 
 def _phone(raw: str) -> tuple[str | None, tuple[str, ...], str | None]:
     value = re.sub(r"^ddd\s*", "", _fold(raw).strip())
-    rules = ["phone_br_format"]
-
-    def spoken_digit(match: re.Match[str]) -> str:
-        return _DIGITS[match.group()]
-
-    value, count = re.subn(
-        r"\b(?:" + "|".join(_DIGITS) + r")\b",
-        spoken_digit,
-        value,
-    )
+    rules: list[str] = []
+    # These words express decimal quantities, not telephone digit groups.
+    if re.search(r"\b(?:ponto|virgula)\b", value):
+        return None, tuple(rules), "Telefone contém uma expressão decimal; confirme os dígitos."
+    # Brazilian phone dictation uses 'meia' for six; text2num leaves it untouched.
+    value, count = re.subn(r"\bmeia\b", "seis", value)
     if count:
-        rules.append("spoken_digits")
+        rules.append("phone_meia_as_six")
+    try:
+        converted = alpha2digit(value, "pt", threshold=0)
+    except ValueError:
+        return None, tuple(rules), "Não foi possível interpretar os números do telefone."
+    if converted != value:
+        rules.append("phone_text2num_pt")
+    value = converted
     if not re.fullmatch(r"\+?[\d\s().-]+", value, flags=re.ASCII):
         return None, tuple(rules), "Telefone contém palavras ou símbolos não reconhecidos."
     digits = re.sub(r"\D", "", value, flags=re.ASCII)
@@ -209,7 +200,23 @@ def _phone(raw: str) -> tuple[str | None, tuple[str, ...], str | None]:
             tuple(rules),
             "Esperados 10 ou 11 dígitos com DDD; nenhum dígito foi corrigido.",
         )
-    return f"{country}({digits[:2]}) {digits[2:-4]}-{digits[-4:]}", tuple(rules), None
+    try:
+        # Parse an explicit country code to avoid implicit trunk/carrier repair.
+        number = phonenumbers.parse(f"+55{digits}", None)
+    except phonenumbers.NumberParseException:
+        return None, tuple(rules), "Telefone brasileiro não reconhecido; confirme o número com DDD."
+    if (
+        number.country_code != 55
+        or phonenumbers.national_significant_number(number) != digits
+        or not phonenumbers.is_valid_number(number)
+    ):
+        return None, tuple(rules), "DDD ou numeração inválida para telefone brasileiro."
+    rules.append("phone_phonenumbers_br")
+    formatted = phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.NATIONAL)
+    # Also check the formatted representation rather than allowing a silent rewrite.
+    if re.sub(r"\D", "", formatted, flags=re.ASCII) != digits:
+        return None, tuple(rules), "A formatação alteraria dígitos; confirme o telefone."
+    return f"{country}{formatted}", tuple(rules), None
 
 
 def _day(text: str) -> int:

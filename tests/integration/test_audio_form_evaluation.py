@@ -181,10 +181,13 @@ async def test_validated_extraction_constrains_writes_through_real_mcp(tmp_path)
         await application.close()
 
 
-async def test_spoken_values_are_treated_before_real_browser_and_wer_uses_raw_text(tmp_path):
+@pytest.mark.parametrize(
+    "phone", ["85 999123456", "oitenta e cinco nove nove nove um dois três quatro cinco seis"]
+)
+async def test_spoken_values_are_treated_before_real_browser_and_wer_uses_raw_text(tmp_path, phone):
     text = (
         "Meu e-mail é ana ponto silva arroba example ponto com. "
-        "Meu telefone é 85 999123456. Minha data de nascimento é quinze de março de 2001."
+        f"Meu telefone é {phone}. Minha data de nascimento é quinze de março de 2001."
     )
 
     class Speech:
@@ -251,6 +254,9 @@ async def test_spoken_values_are_treated_before_real_browser_and_wer_uses_raw_te
         assert row.wer == row.cer == 0
         assert row.transcription == text
         assert "data_normalized" in trace.path.read_text()
+        if "oitenta" in phone:
+            assert "phone_text2num_pt" in trace.path.read_text()
+        assert "phone_phonenumbers_br" in trace.path.read_text()
     finally:
         await application.close()
 

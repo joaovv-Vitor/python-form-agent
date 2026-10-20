@@ -26,6 +26,24 @@ from voice_form.normalization import normalize_spoken_data
         ("Telefone: 85 34567890", "phone", "(85) 3456-7890"),
         ("Whatsapp: +55 85 99912-3456", "phone", "+55 (85) 99912-3456"),
         ("Telefone: 5585999123456", "phone", "+55 (85) 99912-3456"),
+        ("Telefone: 55 85 999123456", "phone", "+55 (85) 99912-3456"),
+        ("Telefone: oitenta e cinco 999123456", "phone", "(85) 99912-3456"),
+        (
+            "Meu telefone é oitenta e cinco nove nove nove um dois três quatro cinco seis.",
+            "phone",
+            "(85) 99912-3456",
+        ),
+        (
+            "Telefone: oitenta e cinco noventa e nove noventa e um vinte e três quarenta e cinco seis",
+            "phone",
+            "(85) 99912-3456",
+        ),
+        (
+            "Telefone: cinquenta e cinco oitenta e cinco nove nove nove um dois três quatro cinco meia",
+            "phone",
+            "+55 (85) 99912-3456",
+        ),
+        ("Telefone: 55 999123456", "phone", "(55) 99912-3456"),
         (
             "Telefone: DDD oito cinco nove nove nove um dois três quatro cinco meia",
             "phone",
@@ -66,7 +84,17 @@ def test_explicit_values_are_normalized_without_changing_source(text, kind, valu
         "Telefone: 859919123456",
         "Telefone: 999123456",
         "Telefone: +1 85999123456",
-        "Telefone: oitenta e cinco 999123456",
+        "Telefone: 20 999123456",
+        "Telefone: 85 899123456",
+        "Telefone: 85 99912345",
+        "Telefone: 085999123456",
+        "Telefone: +55 085999123456",
+        "Telefone: 85 999123456 ramal 123",
+        "Telefone: oitenta e cinco nove nove nove um dois três quatro cinco",
+        "Telefone: oitenta e cinco vírgula nove nove nove um dois três quatro cinco seis",
+        "Telefone: oitenta e cinco ponto nove nove nove um dois três quatro cinco seis",
+        "Telefone: 85 nove nove nove um dois três quatro cinco seis ou 85 999123457",
+        "Telefone: 85 três noves um dois três quatro cinco seis",
         "Telefone: 85 99912-????",
         "Data: 29 de fevereiro de 2001",
         "Data: 31/04/2001",
@@ -98,7 +126,7 @@ def test_email_ascii_convention_is_traced_and_does_not_change_the_person_name():
     assert result.instruction == "Meu nome é João Pedro. Meu e-mail é joao.pedro@gmail.com."
     assert result.fields[0].source_text == "joão.pedro arroba gmail.com"
     assert "email_local_remove_accents" in result.fields[0].rules
-    assert result.version == "spoken-data-pt-BR-v2"
+    assert result.version == "spoken-data-pt-BR-v3"
 
 
 def test_multiple_fields_keep_names_city_terms_and_submission_instruction():
@@ -142,3 +170,18 @@ def test_conflicting_repetitions_are_pending_but_identical_repetitions_are_not()
     assert "ana@example.com" not in conflict.instruction
     repeated = normalize_spoken_data("Telefone: 85 999123456. Telefone: (85) 99912-3456.")
     assert not repeated.issues
+
+
+def test_phone_libraries_are_traced_and_meia_is_interpreted_only_in_phone_fields():
+    text = (
+        "Meu nome é Meia. Telefone: oitenta e cinco nove nove nove um dois três quatro cinco meia. "
+        "E-mail: meia@example.com. Não envie."
+    )
+    result = normalize_spoken_data(text)
+    assert result.original_text == text
+    assert result.instruction == (
+        "Meu nome é Meia. Telefone: (85) 99912-3456. E-mail: meia@example.com. Não envie."
+    )
+    phone = result.fields[0]
+    assert phone.source_text == "oitenta e cinco nove nove nove um dois três quatro cinco meia"
+    assert {"phone_meia_as_six", "phone_text2num_pt", "phone_phonenumbers_br"} <= set(phone.rules)

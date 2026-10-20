@@ -99,9 +99,12 @@ async def test_conflict_is_resolved_once_and_other_data_and_evidence_are_preserv
     assert normalization.fields[0].status == "pending"
 
 
-async def test_invalid_answer_is_not_written_and_second_attempt_formats_phone():
+@pytest.mark.parametrize(
+    "answer", ["85999991234", "oitenta e cinco nove nove nove nove nove um dois três quatro"]
+)
+async def test_invalid_answer_is_not_written_and_second_attempt_formats_phone(answer):
     tools = Tools(field("phone", "tel", required=True))
-    clarification, prompts, _ = session("9999", "85999991234")
+    clarification, prompts, _ = session("9999", answer)
     result = await clarification.run(tools, initial_form(tools), ())
     assert len(prompts) == 2
     assert len(tools.calls) == 1

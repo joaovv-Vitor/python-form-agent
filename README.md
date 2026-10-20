@@ -109,6 +109,12 @@ geram `DATA_PENDING`, são marcados para revisão e bloqueiam o envio. Use
 `--no-normalize-data` para comparar com o fluxo de transcrição bruta. Veja as
 [regras e limites do tratamento](docs/tratamento-dados-falados.md).
 
+Telefones por extenso, como `oitenta e cinco nove nove nove um dois três quatro
+cinco seis`, são convertidos com `text2num` e validados/formatados com `phonenumbers`.
+`Meia` significa seis somente no trecho do telefone. Para atualizar as dependências
+de um ambiente existente, execute `python -m pip install -e .`. DDD inválido,
+numeração incompatível ou dados incompletos continuam pendentes, sem completar dígitos.
+
 Para resolver e-mails e telefones pendentes com respostas digitadas no terminal:
 
 ```bash

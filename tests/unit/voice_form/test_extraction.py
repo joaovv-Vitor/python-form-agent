@@ -73,6 +73,20 @@ def test_grounded_fields_and_formats_produce_a_validated_plan():
         assert text[item.start : item.end] == item.source_text
 
 
+@pytest.mark.parametrize("last_digit", ["6", "7"])
+def test_phone_by_words_is_grounded_using_library_conversion(last_digit):
+    source = "oitenta e cinco nove nove nove um dois três quatro cinco seis"
+    candidate = f"(85) 99912-345{last_digit}"
+    result = validate([field("phone", candidate, source)], source)
+    assert result.original_text == source
+    assert result.fields[0].source_text == source
+    if last_digit == "6":
+        assert result.values == {"phone": "(85) 99912-3456"}
+    else:
+        assert result.values == {}
+        assert result.fields[0].status == "pending"
+
+
 @pytest.mark.parametrize(
     ("ref", "value", "source"),
     [
