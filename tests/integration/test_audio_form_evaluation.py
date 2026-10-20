@@ -324,3 +324,61 @@ async def test_clarification_updates_real_browser_preserves_fields_and_records_h
         assert data["transcription"] == text
     finally:
         await client.close()
+
+
+async def test_real_form_metadata_reaches_whisper_before_form_filling(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from audio_agent.engines import FasterWhisperSpeechToTextEngine
+    from voice_form.pipeline import AudioFormPipeline
+
+    received = []
+
+    def transcribe(path, **kwargs):
+        received.append(kwargs)
+        assert "Nome completo" in kwargs["initial_prompt"]
+        assert "E-mail" in kwargs["initial_prompt"]
+        assert "arroba" in kwargs["hotwords"]
+        assert "Ceará" in kwargs["hotwords"]
+        return iter(
+            [SimpleNamespace(start=0, end=1, text="Meu estado é Ceara.")]
+        ), SimpleNamespace()
+
+    monkeypatch.setattr(
+        "audio_agent.engines.faster_whisper.import_module",
+        lambda _: SimpleNamespace(
+            WhisperModel=lambda *args, **kwargs: SimpleNamespace(transcribe=transcribe)
+        ),
+    )
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"scripted decoder; real MCP/Playwright inspection")
+    client = BrowserToolsClient(
+        browser_config=BrowserConfig((PROJECT_ROOT / "examples/test-form/index.html").as_uri())
+    )
+    agent = FormAgent(client, ScriptedModel())
+    try:
+        with RunTrace(tmp_path / "runs", {}, data_directory=tmp_path / "manual") as trace:
+            agent.events = trace.emit
+            result = await AudioFormPipeline(
+                AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine()),
+                agent,
+                events=trace.emit,
+            ).run(path, TranscriptionSettings())
+        assert len(received) == 1
+        assert not result.issues
+        assert result.form.verification_complete
+        assert not result.form.submission_authorized
+        inspection = await client.inspect_form()
+        assert next(f for f in inspection.fields if f.id == "state").value == "CE"
+        assert next(f for f in inspection.fields if f.id == "email").value == ""
+        events = [json.loads(line) for line in trace.path.read_text().splitlines()]
+        names = [event["event"] for event in events]
+        assert names.index("stt_context_created") < names.index("audio_started")
+        assert names.index("audio_transcribed") < names.index("form_started")
+        settings = result.transcription.settings
+        assert received[0]["initial_prompt"] == settings.initial_prompt
+        data = json.loads((tmp_path / "manual" / trace.run_id / "form_data.json").read_text())
+        assert data["stt_settings"]["hotwords"] == received[0]["hotwords"]
+    finally:
+        await client.close()

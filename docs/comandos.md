@@ -88,6 +88,37 @@ audio-agent-py caminho/para/audio.mp4 --language pt --model small --verbose
 
 ## Preenchimento de formulário por áudio
 
+`voice-form-agent-py` usa contexto automático do formulário por padrão: antes do
+Whisper, inspeciona os campos visíveis via MCP/Playwright e gera `initial_prompt`
+com rótulos e `hotwords` com dicas dos tipos, rótulos e opções de seleção. Não inclui
+valores preenchidos nem texto de botões; ignora campos desabilitados, somente leitura,
+senhas e arquivos. A geração considera até 20 campos, cinco opções por campo e
+limita o prompt a 450 caracteres e o vocabulário a 200. Não exige LLM adicional.
+
+```bash
+# Contexto do formulário aplicado automaticamente:
+voice-form-agent-py caminho/para/audio.wav --language pt
+# Sem contexto automático, para comparação:
+voice-form-agent-py caminho/para/audio.wav --language pt --no-form-context
+```
+
+Cada parâmetro manual (`--initial-prompt`, `--hotwords`) tem prioridade sobre seu
+equivalente gerado. `--email-hints` define os dois parâmetros com o preset fixo,
+dispensando a inspeção prévia. Se a inspeção falhar, o STT continua com as opções
+originais e a falha é registrada. Falha STT ou texto vazio impedem o preenchimento,
+embora o navegador possa já ter sido aberto para obter o contexto.
+
+Os eventos `stt_context_started`, `stt_context_created`/`stt_context_failed` registram
+a etapa. `audio_started.settings`, `transcription.settings` e `form_data.json`
+(`stt_settings`) contêm os parâmetros efetivos; o manifesto inicial registra as
+opções solicitadas e `auto_stt_context`. O tempo dessa inspeção entra no total,
+sem alterar o tempo de inferência STT nem o de preenchimento.
+
+Essa automação pertence à CLI de voz e a `AudioFormPipeline.run` (desativável com
+`auto_context=False`). Avaliações em lote e comparação pareada mantêm o STT
+explicitamente configurado, e `run_transcription` reutiliza a transcrição fornecida.
+`audio-agent-py` opera sem navegador.
+
 Para permitir esclarecimentos pelo terminal durante o fluxo:
 
 ```bash

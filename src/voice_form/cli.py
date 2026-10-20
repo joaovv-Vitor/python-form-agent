@@ -45,6 +45,7 @@ async def run(arguments: argparse.Namespace) -> int:
         manifest["data_treatment"] = arguments.data_treatment
         manifest["extraction"] = extractor.manifest() if extractor else None
         manifest["clarification"] = {"enabled": arguments.clarify, "max_attempts": 2}
+        manifest["auto_stt_context"] = not arguments.no_form_context
         with RunTrace(
             arguments.trace_directory,
             manifest,
@@ -61,7 +62,10 @@ async def run(arguments: argparse.Namespace) -> int:
                 else None,
             )
             result = await pipeline.run(
-                arguments.audio_file, settings, data_treatment=arguments.data_treatment
+                arguments.audio_file,
+                settings,
+                data_treatment=arguments.data_treatment,
+                auto_context=not arguments.no_form_context,
             )
             if arguments.json:
                 print(
@@ -133,6 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("audio_file", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--no-form-context",
+        action="store_true",
+        help="Desativa o contexto automático do Whisper obtido dos campos do formulário.",
+    )
     parser.add_argument(
         "--clarify",
         action="store_true",

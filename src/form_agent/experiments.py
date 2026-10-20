@@ -130,6 +130,7 @@ class RunTrace:
         self._data_directory = data_directory
         self._instruction: str | None = None
         self._transcription: str | None = None
+        self._stt_settings: dict[str, object] | None = None
         self._data_normalization: dict[str, object] | None = None
         self._data_extraction: dict[str, object] | None = None
         self._clarifications: list[dict[str, object]] = []
@@ -162,8 +163,15 @@ class RunTrace:
     def _remember(self, name: str, data: Mapping[str, object]) -> None:
         if name == "form_started":
             self._instruction = str(data.get("instruction", ""))
+        elif name == "audio_started":
+            settings = data.get("settings")
+            if isinstance(settings, dict):
+                self._stt_settings = dict(settings)
         elif name == "audio_transcribed":
             self._transcription = str(data.get("text", ""))
+            settings = data.get("settings")
+            if isinstance(settings, dict):
+                self._stt_settings = dict(settings)
         elif name == "data_normalized":
             self._data_normalization = dict(data)
         elif name == "data_extracted":
@@ -237,6 +245,7 @@ class RunTrace:
             "trace_path": str(self.path),
             "instruction": self._instruction or self._completed.get("instruction"),
             "transcription": self._transcription,
+            "stt_settings": self._stt_settings,
             "data_normalization": self._data_normalization,
             "data_extraction": self._data_extraction,
             "clarifications": self._clarifications,

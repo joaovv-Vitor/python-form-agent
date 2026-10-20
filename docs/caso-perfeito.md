@@ -19,6 +19,10 @@ O comando executa um único áudio e preenche o formulário uma vez. Não execut
 catálogo nem as outras condições. O fluxo é áudio → Whisper → regras locais →
 agente de formulário → MCP local → Playwright → navegador. O agente de formulário
 continua usando o modelo configurado no `.env`; não há extração DeepSeek adicional.
+Atualmente, sem dicas manuais, a CLI consulta o formulário via MCP/Playwright antes
+do Whisper e gera contexto automático. O comando acima conserva `--email-hints`
+para reproduzir a orientação fixa usada nos resultados deste piloto. Para testar
+a nova condição automática, remova essa opção e registre uma rodada separada.
 
 Requisitos: ambiente instalado com suporte a áudio, credencial do agente de
 formulário no `.env`, Chromium e gravação no caminho indicado. O áudio e o cache

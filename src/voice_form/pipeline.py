@@ -22,6 +22,7 @@ from form_agent.core.events import EventSink, discard_event
 from form_agent.core.schemas import AgentResult, RunIssue
 
 from .clarification import ClarificationRecord, ClarificationSession
+from .context import contextualize
 from .extraction import DataExtractor, ExtractionResponseError, ExtractionResult
 from .normalization import NormalizationResult, normalize_spoken_data
 
@@ -94,10 +95,28 @@ class AudioFormPipeline:
         authorize_submission: bool = False,
         normalize_data: bool = True,
         data_treatment: DataTreatment | None = None,
+        auto_context: bool = True,
     ) -> PipelineResult:
         started = time.perf_counter()
-        self.events("audio_started", {"path": str(path), "settings": settings.to_dict()})
         try:
+            if (
+                auto_context
+                and path.expanduser().is_file()
+                and (settings.initial_prompt is None or settings.hotwords is None)
+            ):
+                self.events("stt_context_started", {})
+                try:
+                    inventory = await self.form.tools.inspect_form()
+                except FormAgentError as exc:
+                    # Context is optional: retain STT even if the browser is unavailable.
+                    self.events("stt_context_failed", {"code": error_code(exc), "error": str(exc)})
+                else:
+                    settings = contextualize(settings, inventory)
+                    self.events(
+                        "stt_context_created",
+                        {"initial_prompt": settings.initial_prompt, "hotwords": settings.hotwords},
+                    )
+            self.events("audio_started", {"path": str(path), "settings": settings.to_dict()})
             transcription = await asyncio.to_thread(self.audio.transcribe, path, settings)
         except (AudioAgentError, OSError, ValueError) as exc:
             self.events("audio_failed", {"code": "STT_ERROR", "error": str(exc)})

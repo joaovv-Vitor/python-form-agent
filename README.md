@@ -73,6 +73,22 @@ voice-form-agent-py samples/exemplo.wav --language pt --confirm-submit
 python -m voice_form.cli samples/exemplo.wav --language pt
 ```
 
+A CLI de voz contextualiza o Whisper automaticamente a partir do formulário:
+MCP/Playwright inspeciona os campos antes da transcrição e fornece rótulos, tipos
+e opções como vocabulário. Assim, um formulário com e-mail recebe dicas como
+`arroba`, `@` e `ponto`, sem precisar de `--email-hints`. Os valores já preenchidos
+não são usados para gerar as dicas. O navegador permanece na mesma sessão para
+o preenchimento posterior.
+
+Use `--no-form-context` para desativar essa etapa. `--initial-prompt` e `--hotwords`
+substituem seus respectivos parâmetros automáticos; `--email-hints` mantém o preset
+fixo existente. O contexto efetivo fica no JSON da transcrição, no evento
+`audio_started` e em `form_data.json` (`stt_settings`). Se a inspeção falhar, o evento
+`stt_context_failed` registra a falha e a transcrição usa a configuração original.
+Os comandos de avaliação em lote mantêm as dicas explicitamente configuradas,
+inclusive na comparação pareada, para preservar as condições experimentais.
+Transcrição isolada com `audio-agent-py` continua sem consulta ao navegador.
+
 Para acompanhar o preenchimento no navegador, desative o modo headless. A opção
 `--confirm-submit` mantém a janela aberta enquanto a revisão aguarda no terminal; pressione
 Enter para encerrar sem enviar ou digite exatamente `ENVIAR` para autorizar a submissão:

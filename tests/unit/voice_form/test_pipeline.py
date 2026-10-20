@@ -1,22 +1,25 @@
+import pytest
+
 from audio_agent.agent import AudioAgent
 from audio_agent.models import EngineTranscription, TranscriptionSettings
 from audio_agent.preprocessing import AudioPreprocessor
 from form_agent.core.agent import FormAgent
-from form_agent.core.errors import ModelCommunicationError
-from form_agent.core.schemas import FormInspection, ToolCall, ToolDefinition
+from form_agent.core.errors import ModelCommunicationError, ToolClientError
+from form_agent.core.schemas import FormField, FormInspection, ToolCall, ToolDefinition
 from voice_form.pipeline import AudioFormPipeline
 
 
 class Tools:
-    def __init__(self):
+    def __init__(self, inventory=None):
         self.calls = []
+        self.inventory = inventory or FormInspection("file:///form.html")
 
     async def list_tools(self):
         return [ToolDefinition("click_button", "send", {})]
 
     async def inspect_form(self):
         self.calls.append("inspect")
-        return FormInspection("file:///form.html")
+        return self.inventory
 
     async def call_tool(self, name, arguments=None):
         self.calls.append(name)
@@ -48,6 +51,7 @@ class Engine:
         self.text = text
 
     def transcribe(self, audio, settings):
+        self.settings = settings
         return EngineTranscription("fake", "1", self.text, "pt", 1.0, 2.0, ())
 
 
@@ -68,7 +72,7 @@ async def test_transcription_reaches_real_form_agent_without_granting_authority(
     assert result.total_seconds >= result.form_seconds >= 0
 
 
-async def test_empty_or_missing_audio_never_reaches_form(tmp_path):
+async def test_empty_or_missing_audio_never_starts_form_filling(tmp_path):
     for exists in (False, True):
         path = tmp_path / "audio.wav"
         if exists:
@@ -79,7 +83,7 @@ async def test_empty_or_missing_audio_never_reaches_form(tmp_path):
             FormAgent(tools, model),
         ).run(path, TranscriptionSettings())
         assert result.form is None
-        assert not tools.calls
+        assert tools.calls == (["inspect"] if exists else [])
         assert model.instruction is None
         assert result.issues[0].code == ("STT_EMPTY" if exists else "STT_ERROR")
 
@@ -190,6 +194,88 @@ async def test_invalid_extraction_preserves_stt_and_never_starts_form(tmp_path):
     assert result.data_treatment == "deepseek"
     assert result.form is None
     assert model.instruction is None
-    assert tools.calls == ["inspect"]
+    assert tools.calls == ["inspect", "inspect"]
     assert result.issues[0].code == "EXTRACTION_ERROR"
     assert dict(events)["extraction_failed"]["response_json"] == "not-json"
+
+
+async def test_form_context_is_read_before_stt_and_effective_settings_are_traced(tmp_path):
+    import json
+
+    from form_agent.experiments import RunTrace
+
+    tools = Tools(
+        FormInspection(
+            "file:///form.html",
+            (FormField("E-mail de contato", "email", "email", "email", "textbox"),),
+        )
+    )
+
+    class Speech(Engine):
+        def transcribe(self, audio, settings):
+            assert tools.calls == ["inspect"]
+            return super().transcribe(audio, settings)
+
+    speech = Speech("Não envie.")
+    settings = TranscriptionSettings()
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    with RunTrace(tmp_path / "runs", {}, data_directory=tmp_path / "manual") as trace:
+        result = await AudioFormPipeline(
+            AudioAgent(AudioPreprocessor(), speech),
+            FormAgent(tools, Model()),
+            events=trace.emit,
+        ).run(path, settings)
+    assert "E-mail de contato" in speech.settings.initial_prompt
+    assert "arroba" in speech.settings.hotwords
+    assert result.transcription.settings == speech.settings
+    assert settings.initial_prompt is settings.hotwords is None
+    assert not result.form.submission_authorized
+    events = [json.loads(line) for line in trace.path.read_text().splitlines()]
+    names = [event["event"] for event in events]
+    assert names.index("stt_context_created") < names.index("audio_started")
+    data = json.loads((tmp_path / "manual" / trace.run_id / "form_data.json").read_text())
+    assert data["stt_settings"] == speech.settings.to_dict()
+
+
+@pytest.mark.parametrize("manual", [False, True])
+async def test_opt_out_or_fully_manual_context_skips_inspection_before_stt(tmp_path, manual):
+    tools = Tools()
+
+    class Speech(Engine):
+        def transcribe(self, audio, settings):
+            assert not tools.calls
+            return super().transcribe(audio, settings)
+
+    speech = Speech("Não envie.")
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    settings = (
+        TranscriptionSettings(initial_prompt="Contexto manual", hotwords="Vocabulário manual")
+        if manual
+        else TranscriptionSettings()
+    )
+    await AudioFormPipeline(AudioAgent(AudioPreprocessor(), speech), FormAgent(tools, Model())).run(
+        path, settings, auto_context=manual
+    )
+    assert speech.settings == settings
+
+
+async def test_browser_context_failure_preserves_stt_and_reports_form_failure(tmp_path):
+    class OfflineTools(Tools):
+        async def inspect_form(self):
+            raise ToolClientError("offline", "TIMEOUT")
+
+    events = []
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    result = await AudioFormPipeline(
+        AudioAgent(AudioPreprocessor(), Engine("Texto preservado")),
+        FormAgent(OfflineTools(), Model()),
+        events=lambda name, data: events.append((name, data)),
+    ).run(path, TranscriptionSettings())
+    assert result.transcription.text == "Texto preservado"
+    assert result.transcription.settings.initial_prompt is None
+    assert result.form is None
+    assert result.issues[0].code == "TIMEOUT"
+    assert dict(events)["stt_context_failed"]["code"] == "TIMEOUT"

@@ -78,7 +78,7 @@ async def run_audio_attempt(
             if application is None or case.audio_file is None:
                 raise ValueError("Application e áudio necessários no modo pipeline")
             authorized = allow_submission and case.submission_authorized
-            # This handshake does not launch Chromium. Browser startup remains after successful STT.
+            # Batch evaluation keeps explicitly configured STT hints for reproducibility.
             await application.client.set_submission_authorized(authorized)
             pipeline = AudioFormPipeline(
                 audio, application.agent, events=trace.emit, extractor=extractor
@@ -97,6 +97,7 @@ async def run_audio_attempt(
                     authorize_submission=authorized,
                     normalize_data=normalize_data,
                     data_treatment=data_treatment,
+                    auto_context=False,
                 )
             transcription, form_seconds = result.transcription, result.form_seconds
             normalized_instruction = (

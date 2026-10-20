@@ -159,6 +159,26 @@ def test_cli_rejects_json_with_interactive_clarification(capsys):
     assert "--json e --clarify" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("disabled", [False, True])
+def test_cli_uses_form_context_by_default_and_supports_opt_out(
+    tmp_path, monkeypatch, capsys, disabled
+):
+    inventory = FormInspection(
+        "file:///form", (FormField("E-mail", "email", "email", "email", "textbox"),)
+    )
+    application(monkeypatch, "Não envie.", inventory)
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    args = [str(path), "--json", "--trace-directory", str(tmp_path / "runs")]
+    if disabled:
+        args.append("--no-form-context")
+    assert cli.main(args) == 0
+    data = json.loads(capsys.readouterr().out)
+    settings = data["transcription"]["settings"]
+    assert settings["initial_prompt"] == (None if disabled else "Formulário: E-mail.")
+    assert (settings["hotwords"] is None) == disabled
+
+
 @pytest.mark.parametrize(
     "answer,denied,expected",
     [
