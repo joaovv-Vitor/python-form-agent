@@ -88,6 +88,19 @@ audio-agent-py caminho/para/audio.mp4 --language pt --model small --verbose
 
 ## Preenchimento de formulário por áudio
 
+Para manter a sessão aberta para revisão e correções pontuais:
+
+```bash
+voice-form-agent-py caminho/para/audio.wav --language pt --review
+voice-form-agent-py caminho/para/audio.wav --language pt --review --confirm-submit
+```
+
+Na revisão, digite uma correção ou `AUDIO caminho/da/correcao.wav`. Use `MOSTRAR`,
+`PENDENCIAS`, `PULAR`, `CONCLUIR` ou `ENCERRAR`. Cada pedido pode alterar um campo;
+ambiguidades geram uma pergunta. `CONCLUIR` permite a confirmação separada de envio
+quando habilitada; `ENCERRAR`/EOF encerra sem oferecer envio. `--json` e `--review`
+são incompatíveis. Consulte a [referência da revisão](revisao-interativa.md).
+
 `voice-form-agent-py` usa contexto automático do formulário por padrão: antes do
 Whisper, inspeciona os campos visíveis via MCP/Playwright e gera `initial_prompt`
 com rótulos e `hotwords` com dicas dos tipos, rótulos e opções de seleção. Não inclui

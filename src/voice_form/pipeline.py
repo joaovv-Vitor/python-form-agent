@@ -25,6 +25,7 @@ from .clarification import ClarificationRecord, ClarificationSession
 from .context import contextualize
 from .extraction import DataExtractor, ExtractionResponseError, ExtractionResult
 from .normalization import NormalizationResult, normalize_spoken_data
+from .review import ReviewRecord
 
 type DataTreatment = Literal["raw", "rules", "deepseek"]
 
@@ -51,6 +52,8 @@ class PipelineResult:
     clarifications: tuple[ClarificationRecord, ...] = ()
     clarification_seconds: float = 0.0
     initial_issues: tuple[RunIssue, ...] = ()
+    review_records: tuple[ReviewRecord, ...] = ()
+    review_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -68,6 +71,8 @@ class PipelineResult:
             "clarifications": [asdict(item) for item in self.clarifications],
             "clarification_seconds": self.clarification_seconds,
             "initial_issues": [asdict(issue) for issue in self.initial_issues],
+            "review_records": [asdict(item) for item in self.review_records],
+            "review_seconds": self.review_seconds,
         }
 
 

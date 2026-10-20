@@ -6,16 +6,30 @@ import pytest
 
 from audio_agent.models import EngineTranscription
 from form_agent.config import BrowserConfig, ModelConfig
-from form_agent.core.schemas import AgentResult, FormField, FormInspection
+from form_agent.core.schemas import AgentResult, FormField, FormInspection, RunIssue, ToolCall
 from voice_form import cli
 
 
-def application(monkeypatch, text, inventory=None):
+def application(
+    monkeypatch, text, inventory=None, *, review_batches=(), correction_text=None, form_issues=()
+):
     observed = inventory or FormInspection("file:///form")
 
     class Speech:
         def transcribe(self, audio, settings):
-            return EngineTranscription("scripted", "1", text, "pt", 1.0, 1.0, ())
+            recognized = correction_text if audio.input_path.name == "correction.wav" else text
+            return EngineTranscription("scripted", "1", recognized, "pt", 1.0, 1.0, ())
+
+    class ReviewModel:
+        def __init__(self):
+            self.batches = iter(review_batches)
+
+        def create_session(self, instruction, inspection, tools):
+            assert {tool.name for tool in tools} == {"fill_field", "ask_clarification"}
+            return self
+
+        async def next(self, completed):
+            return next(self.batches)
 
     class Agent:
         max_turns = 8
@@ -23,7 +37,13 @@ def application(monkeypatch, text, inventory=None):
         async def run(self, instruction, *, authorize_submission=False, field_values=None):
             inspection = inventory or FormInspection("file:///form")
             return AgentResult(
-                "Valores observados", inspection, (), False, True, final_inspection=inspection
+                "Valores observados",
+                inspection,
+                (),
+                False,
+                True,
+                final_inspection=inspection,
+                issues=form_issues,
             )
 
     closed = []
@@ -32,7 +52,10 @@ def application(monkeypatch, text, inventory=None):
         closed.append(True)
 
     app = SimpleNamespace(
-        config=ModelConfig("test", "test", "test", "unused"), agent=Agent(), close=close
+        config=ModelConfig("test", "test", "test", "unused"),
+        agent=Agent(),
+        model=ReviewModel(),
+        close=close,
     )
 
     async def inspect():
@@ -157,6 +180,144 @@ def test_cli_rejects_json_with_interactive_clarification(capsys):
         cli.main(["audio.wav", "--json", "--clarify"])
     assert exc.value.code == 2
     assert "--json e --clarify" in capsys.readouterr().err
+
+
+def test_cli_rejects_json_with_interactive_review(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["audio.wav", "--json", "--review"])
+    assert exc.value.code == 2
+    assert "--json e --review" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "ending,denied,confirmed",
+    [
+        ("CONCLUIR", False, True),
+        ("ENCERRAR", False, False),
+        (EOFError(), False, False),
+        ("CONCLUIR", True, False),
+    ],
+)
+def test_cli_review_updates_values_before_separate_submission_confirmation(
+    tmp_path, monkeypatch, capsys, ending, denied, confirmed
+):
+    inventory = FormInspection(
+        "file:///form",
+        (
+            FormField("Cidade", "city", "city", "text", "textbox", value="Fortaleza"),
+            FormField("Nome", "name", "name", "text", "textbox", value="Ana"),
+        ),
+    )
+    initial_text = "Meu nome é Ana. Pode enviar."
+    closed = application(
+        monkeypatch,
+        initial_text,
+        inventory,
+        review_batches=[
+            [
+                ToolCall(
+                    "change",
+                    "fill_field",
+                    {"field": "city", "value": "Quixadá", "source_text": "Quixadá"},
+                ),
+            ]
+        ],
+    )
+    answers = iter(
+        [("Não envie. " if denied else "") + "Corrija somente a cidade para Quixadá", ending]
+    )
+
+    def answer(_):
+        item = next(answers)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr("builtins.input", answer)
+    confirmations = []
+
+    async def confirm(app, result):
+        confirmations.append(result)
+        assert {f.reference: f.value for f in result.final_inspection.fields} == {
+            "city": "Quixadá",
+            "name": "Ana",
+        }
+        return {"submitted": True}
+
+    monkeypatch.setattr(cli, "confirm_submission", confirm)
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    code = cli.main(
+        [str(path), "--review", "--confirm-submit", "--trace-directory", str(tmp_path / "runs")]
+    )
+    assert code == (2 if denied else 0)
+    assert bool(confirmations) == confirmed
+    assert closed == [True]
+    assert "Demais campos preservados" in capsys.readouterr().out
+    data = json.loads(next((tmp_path / "manual").glob("*/form_data.json")).read_text())
+    assert data["transcription"] == initial_text
+    assert data["form_fields"] == {"city": "Quixadá", "name": "Ana"}
+    assert data["review_records"][0]["previous"] == "Fortaleza"
+    assert data["review_records"][0]["value"] == "Quixadá"
+
+
+def test_cli_audio_review_uses_new_audio_and_preserves_original_transcription(
+    tmp_path, monkeypatch, capsys
+):
+    inventory = FormInspection(
+        "file:///form", (FormField("Cidade", "city", "city", "text", "textbox", value="Fortaleza"),)
+    )
+    application(
+        monkeypatch,
+        "Minha cidade é Fortaleza.",
+        inventory,
+        correction_text="Na verdade moro em Quixadá",
+        review_batches=[
+            [
+                ToolCall(
+                    "change",
+                    "fill_field",
+                    {"field": "city", "value": "Quixadá", "source_text": "Quixadá"},
+                ),
+            ]
+        ],
+    )
+    initial_path, correction_path = tmp_path / "audio.wav", tmp_path / "correction.wav"
+    initial_path.write_bytes(b"initial")
+    correction_path.write_bytes(b"correction")
+    answers = iter([f"AUDIO {correction_path}", "CONCLUIR"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    assert (
+        cli.main([str(initial_path), "--review", "--trace-directory", str(tmp_path / "runs")]) == 0
+    )
+    capsys.readouterr()
+    data = json.loads(next((tmp_path / "manual").glob("*/form_data.json")).read_text())
+    assert data["transcription"] == "Minha cidade é Fortaleza."
+    assert data["review_transcriptions"][0]["text"] == "Na verdade moro em Quixadá"
+    assert data["form_fields"]["city"] == "Quixadá"
+
+
+def test_review_does_not_offer_submission_while_unrelated_failures_remain(
+    tmp_path, monkeypatch, capsys
+):
+    application(
+        monkeypatch, "Pode enviar.", form_issues=(RunIssue("DATA_BLOCKED", "tool", "Outro erro"),)
+    )
+    monkeypatch.setattr("builtins.input", lambda _: "CONCLUIR")
+
+    async def forbidden(*args):
+        raise AssertionError("Review failures must block submission confirmation")
+
+    monkeypatch.setattr(cli, "confirm_submission", forbidden)
+    path = tmp_path / "audio.wav"
+    path.write_bytes(b"audio")
+    assert (
+        cli.main(
+            [str(path), "--review", "--confirm-submit", "--trace-directory", str(tmp_path / "runs")]
+        )
+        == 2
+    )
+    assert "a revisão ainda contém falhas" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("disabled", [False, True])

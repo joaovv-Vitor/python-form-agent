@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from audio_agent.agent import AudioAgent
@@ -23,6 +24,7 @@ from .clarification import ClarificationSession
 from .extraction import create_extractor
 from .normalization import DATA_NORMALIZATION_VERSION
 from .pipeline import AudioFormPipeline
+from .review import REVIEW_VERSION, ReviewSession
 
 
 async def run(arguments: argparse.Namespace) -> int:
@@ -46,14 +48,16 @@ async def run(arguments: argparse.Namespace) -> int:
         manifest["extraction"] = extractor.manifest() if extractor else None
         manifest["clarification"] = {"enabled": arguments.clarify, "max_attempts": 2}
         manifest["auto_stt_context"] = not arguments.no_form_context
+        manifest["review"] = {"enabled": arguments.review, "version": REVIEW_VERSION}
         with RunTrace(
             arguments.trace_directory,
             manifest,
             data_directory=arguments.trace_directory.parent / "manual",
         ) as trace:
             application.agent.events = trace.emit
+            audio = AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine())
             pipeline = AudioFormPipeline(
-                AudioAgent(AudioPreprocessor(), FasterWhisperSpeechToTextEngine()),
+                audio,
                 application.agent,
                 events=trace.emit,
                 extractor=extractor,
@@ -96,7 +100,41 @@ async def run(arguments: argparse.Namespace) -> int:
                     print(result.form.message)
                 else:
                     print("; ".join(f"{issue.code}: {issue.message}" for issue in result.issues))
-            if arguments.confirm_submit and result.form and result.transcription:
+            review_completed = True
+            denied = bool(result.transcription and submission_denied(result.transcription.text))
+            if arguments.review and result.form:
+                reviewed = await ReviewSession(
+                    application.agent.tools,
+                    application.model,
+                    audio,
+                    settings,
+                    auto_context=not arguments.no_form_context,
+                    events=trace.emit,
+                ).run(
+                    result.form,
+                    result.issues,
+                    normalization=result.normalization,
+                    extraction=result.extraction,
+                    denied=denied,
+                )
+                review_completed, denied = reviewed.completed, reviewed.submission_denied
+                result = replace(
+                    result,
+                    form=reviewed.form,
+                    issues=reviewed.issues,
+                    initial_issues=result.initial_issues or result.issues,
+                    review_records=reviewed.records,
+                    review_seconds=reviewed.seconds,
+                    total_seconds=result.total_seconds + reviewed.seconds,
+                    post_stt_seconds=result.post_stt_seconds + reviewed.seconds,
+                )
+                print(reviewed.form.message)
+            if (
+                arguments.confirm_submit
+                and review_completed
+                and result.form
+                and result.transcription
+            ):
                 if any(issue.code == "DATA_PENDING" for issue in result.issues):
                     trace.emit(
                         "run_completed",
@@ -104,7 +142,16 @@ async def run(arguments: argparse.Namespace) -> int:
                     )
                     print("Revise os dados pendentes antes de solicitar o envio.")
                     return 2
-                if submission_denied(result.transcription.text):
+                if arguments.review and (
+                    not result.form.verification_complete
+                    or any(issue.code != "SUBMISSION_BLOCKED" for issue in result.issues)
+                ):
+                    trace.emit(
+                        "run_completed", {**result.to_dict(), "human_submission": "review_blocked"}
+                    )
+                    print("Envio bloqueado: a revisão ainda contém falhas.")
+                    return 2
+                if denied:
                     trace.emit(
                         "run_completed",
                         {**result.to_dict(), "human_submission": "denied_by_instruction"},
@@ -137,6 +184,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("audio_file", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="Mantém a sessão aberta para correções por texto ou novos arquivos de áudio.",
+    )
     parser.add_argument(
         "--no-form-context",
         action="store_true",
@@ -174,6 +226,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--json e --confirm-submit não podem ser combinados")
     if arguments.json and arguments.clarify:
         parser.error("--json e --clarify não podem ser combinados")
+    if arguments.json and arguments.review:
+        parser.error("--json e --review não podem ser combinados")
     try:
         return asyncio.run(run(arguments))
     except (FormAgentError, ValueError) as exc:

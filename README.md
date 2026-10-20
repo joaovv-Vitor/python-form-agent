@@ -130,6 +130,22 @@ locais e pela conferência no navegador, na mesma sessão, sem retranscrever o �
 O modo interativo é opcional e incompatível com `--json`; avaliações em lote continuam
 sem perguntas. Veja o [fluxo, critérios e limites do esclarecimento](docs/esclarecimento-usuario.md).
 
+Para revisar os dados e fazer correções pontuais na mesma sessão do navegador:
+
+```bash
+voice-form-agent-py samples/exemplo.wav --language pt --review
+# Com confirmação de envio separada, depois de concluir a revisão:
+voice-form-agent-py samples/exemplo.wav --language pt --review --confirm-submit
+```
+
+Após o preenchimento inicial, digite, por exemplo, `Corrija somente meu telefone
+para 85 98888-1234` ou use `AUDIO samples/correcao.wav` para uma nova instrução falada.
+O sistema valida e aplica um campo por vez, conferindo a preservação dos demais.
+`MOSTRAR` exibe os dados; `PENDENCIAS` lista os problemas; `PULAR` descarta um pedido;
+`CONCLUIR` termina a revisão; `ENCERRAR` ou EOF encerra sem oferecer envio.
+Ambiguidades geram uma pergunta antes de qualquer escrita. O modo é opcional e
+incompatível com `--json`. Veja o [fluxo e os limites da revisão](docs/revisao-interativa.md).
+
 Para a terceira condição, use `--data-treatment deepseek`: Whisper transcreve,
 DeepSeek extrai campos com evidências e pendências, e o código valida os formatos.
 O FormAgent só pode preencher os valores aprovados, usando o MCP local existente.
@@ -339,6 +355,7 @@ examples/                # formulário base e fixture adversarial nativa
 - [Caso perfeito e configuração selecionada no piloto](docs/caso-perfeito.md)
 - [Tratamento de e-mail, telefone e data](docs/tratamento-dados-falados.md)
 - [Esclarecimento de pendências com o usuário](docs/esclarecimento-usuario.md)
+- [Revisão e correções na mesma sessão](docs/revisao-interativa.md)
 - [Comparação pareada de raw, rules e DeepSeek](docs/comparacao-tratamentos.md)
 - [43 cenários de formulário e 20 condições de áudio](docs/cenarios-adversariais.md)
 - [Dataset proposto e protocolo de coleta](evaluation/audio/README.md)

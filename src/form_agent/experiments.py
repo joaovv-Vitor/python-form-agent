@@ -134,6 +134,8 @@ class RunTrace:
         self._data_normalization: dict[str, object] | None = None
         self._data_extraction: dict[str, object] | None = None
         self._clarifications: list[dict[str, object]] = []
+        self._reviews: list[dict[str, object]] = []
+        self._review_transcriptions: list[dict[str, object]] = []
         self._initial_fields: list[dict[str, object]] = []
         self._final_fields: list[dict[str, object]] = []
         self._written_fields: dict[str, object] = {}
@@ -188,7 +190,16 @@ class RunTrace:
                     self._written_fields[str(reference)] = output.get("value")
         elif name == "clarification_record":
             self._clarifications.append(dict(data))
-        elif name in {"form_completed", "clarification_completed"}:
+        elif name == "review_record":
+            self._reviews.append(dict(data))
+        elif name == "review_audio_transcribed":
+            self._review_transcriptions.append(dict(data))
+        elif name in {
+            "form_completed",
+            "clarification_completed",
+            "review_updated",
+            "review_completed",
+        }:
             inspection = data.get("final_inspection")
             if isinstance(inspection, dict):
                 self._form_url = str(inspection.get("url", ""))
@@ -201,6 +212,8 @@ class RunTrace:
             self._verification_complete = complete if isinstance(complete, bool) else None
             submitted = data.get("submitted")
             self._submitted = submitted if isinstance(submitted, bool) else None
+        elif name == "run_interrupted":
+            self._verification_complete = False
         elif name == "run_completed":
             self._completed = dict(data)
 
@@ -249,6 +262,8 @@ class RunTrace:
             "data_normalization": self._data_normalization,
             "data_extraction": self._data_extraction,
             "clarifications": self._clarifications,
+            "review_records": self._reviews,
+            "review_transcriptions": self._review_transcriptions,
             "initial_issues": self._completed.get("initial_issues"),
             "form_url": self._form_url,
             "filled_fields": filled,
