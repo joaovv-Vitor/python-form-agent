@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from importlib.resources import files
@@ -42,6 +43,11 @@ class WebConfig:
     )
 
     def __post_init__(self) -> None:
+        if not all(
+            math.isfinite(value)
+            for value in (self.max_audio_seconds, self.idle_seconds, self.operation_seconds)
+        ):
+            raise ValueError("Os limites web devem ser finitos.")
         if (
             min(
                 self.max_sessions,

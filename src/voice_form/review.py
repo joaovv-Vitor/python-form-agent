@@ -208,7 +208,7 @@ class ReviewSession:
             except EOFError:
                 entry = ReviewInput("close")
             answer = entry.text
-            self.events("review_input", {"text": answer})
+            self.events("review_input", {"text": answer, "kind": entry.kind})
             command = {
                 "show": "mostrar",
                 "pending": "pendencias",

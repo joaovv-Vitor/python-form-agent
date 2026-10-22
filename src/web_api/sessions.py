@@ -189,8 +189,14 @@ class Session:
         self.publish("message")
 
     def public_text(self, text: str) -> str:
-        return text.replace(str(self.directory), "[áudio enviado]").replace(
-            str(asset("form.html")), "[formulário padrão]"
+        return (
+            text.replace(str(self.directory), "[áudio enviado]")
+            .replace(str(asset("form.html")), "[formulário padrão]")
+            .replace(" ou digite PULAR ou ENCERRAR", " ou use os controles da sessão")
+            .replace(
+                "Digite o número ou identificador, PULAR ou ENCERRAR: ",
+                "Responda com o número ou identificador do campo: ",
+            )
         )
 
     def snapshot(self, value: FormInspection) -> None:

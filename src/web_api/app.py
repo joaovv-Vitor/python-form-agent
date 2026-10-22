@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import os
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -276,8 +277,8 @@ def main() -> None:
     uvicorn.run(
         "web_api.app:create_app",
         factory=True,
-        host="0.0.0.0",
-        port=8000,
+        host=os.getenv("WEB_HOST", "127.0.0.1"),
+        port=int(os.getenv("WEB_PORT", "8000")),
         workers=1,
         timeout_graceful_shutdown=30,
     )
