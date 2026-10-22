@@ -5,6 +5,24 @@ formulários web com um agente baseado em LLM. Mantém interfaces independentes 
 STT e ferramentas, MCP local por stdio e Playwright encapsulado. O áudio pode ser usado
 isoladamente ou composto com o Form Agent.
 
+A [aplicação web V1](docs/web-v1.md) usa o formulário padrão, recebe arquivos de
+áudio e mostra o preenchimento, as mensagens e a revisão na mesma sessão. Inclui
+confirmação de envio simulado e configuração para implantação no homelab.
+
+Com as dependências e o `.env` configurados:
+
+```bash
+python -m pip install -e '.[audio,web,dev]'
+cd frontend
+npm ci
+npm run build
+cd ..
+HF_HUB_CACHE=reports/model-cache form-web-py
+```
+
+Abra [localhost:8000](http://localhost:8000). Consulte o [guia web](docs/web-v1.md)
+para instalar Chromium, configurar sessões e publicar pelo domínio.
+
 Consulte a [referência completa de comandos](docs/comandos.md) para instalação, execução,
 avaliação do dataset, parâmetros do Whisper, testes e geração de relatórios.
 

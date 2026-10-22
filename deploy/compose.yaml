@@ -1,0 +1,29 @@
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      WEB_COOKIE_SECURE: "true"
+      WEB_PUBLIC_ORIGIN: ${WEB_PUBLIC_ORIGIN:?Defina a origem HTTPS do seu dominio}
+      WEB_MAX_SESSIONS: "1"
+      WEB_IDLE_SECONDS: "900"
+      WEB_OPERATION_SECONDS: "600"
+      WEB_MAX_UPLOAD_BYTES: "26214400"
+      WEB_MAX_AUDIO_SECONDS: "120"
+      WEB_STT_MODEL: ${WEB_STT_MODEL:-large-v3}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - form-data:/var/lib/form-agent
+      - whisper-cache:/var/cache/models
+    shm_size: "256mb"
+    stop_grace_period: 11m
+
+volumes:
+  form-data:
+  whisper-cache:

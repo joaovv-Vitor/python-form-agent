@@ -4,6 +4,12 @@ Data: 22 de outubro de 2026.
 
 Este documento propõe a implementação; não indica funcionalidades web já entregues.
 
+Atualização de implementação (22/10/2026): os marcos 1 a 5 foram implementados e
+validados localmente, incluindo o fluxo completo em HTTP/MCP/Chromium com modelos
+simulados. O marco 6 tem arquivos de contêiner/proxy e Compose validados
+sintaticamente; execução da imagem e piloto com modelos reais no homelab permanecem
+pendentes. Consulte o [guia da V1](web-v1.md) para comandos e limites efetivos.
+
 ## 1. Objetivo e escopo
 
 Disponibilizar a PoC como aplicação web no homelab, usando exclusivamente o
