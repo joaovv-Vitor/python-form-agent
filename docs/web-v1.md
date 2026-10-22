@@ -36,7 +36,10 @@ HF_HUB_CACHE=reports/model-cache form-web-py
 Abra [http://localhost:8000](http://localhost:8000). O serviço prepara a sessão e
 os sete campos reais antes de aceitar o áudio. Selecione o arquivo, escute-o se
 necessário e pressione **Preencher com áudio**. Na revisão, use o campo de texto
-ou **Corrigir por outro arquivo de áudio**. Para encerrar sem enviar, use
+ou a seção **Corrigir campo por áudio**, que fica aberta: selecione uma nova
+gravação e clique em **Enviar áudio de correção**. Diga o campo e o novo valor,
+por exemplo, “Corrija minha cidade para Quixadá”; os demais campos são mantidos.
+Para encerrar sem enviar, use
 **Encerrar sessão**.
 
 O primeiro uso pode baixar/carregar o modelo. O padrão reproduz a configuração

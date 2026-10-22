@@ -378,12 +378,16 @@ export default function App() {
                 )}
 
                 {(state === 'ready' || session.can_correct_audio) && (
-                  <details className="audio-section" open={state === 'ready' ? true : undefined}>
-                    <summary>
-                      {state === 'ready'
-                        ? 'Arquivo de áudio'
-                        : 'Corrigir por outro arquivo de áudio'}
-                    </summary>
+                  <section className="audio-section" aria-labelledby="audio-title">
+                    <h3 id="audio-title">
+                      {state === 'ready' ? 'Arquivo de áudio' : 'Corrigir campo por áudio'}
+                    </h3>
+                    {state !== 'ready' && (
+                      <p className="instructions" id="audio-correction-help">
+                        Envie uma gravação dizendo qual campo deseja corrigir e o novo valor. Ex.:
+                        “Corrija minha cidade para Quixadá”. Os outros campos são mantidos.
+                      </p>
+                    )}
                     <form className="upload" onSubmit={upload}>
                       <label className="file-picker" htmlFor="audio-file">
                         <span className="upload-symbol" aria-hidden="true">
@@ -394,7 +398,7 @@ export default function App() {
                             ? file.name
                             : state === 'ready'
                               ? 'Selecionar arquivo de áudio'
-                              : 'Enviar áudio de correção'}
+                              : 'Selecionar áudio de correção'}
                         </strong>
                         <small>
                           WAV, MP3, MP4, M4A ou FLAC · até {Math.round(maxBytes / 1024 / 1024)} MiB
@@ -405,6 +409,7 @@ export default function App() {
                         id="audio-file"
                         type="file"
                         accept=".wav,.mp3,.mp4,.m4a,.flac"
+                        aria-describedby={state === 'ready' ? undefined : 'audio-correction-help'}
                         disabled={working}
                         onChange={(e) => {
                           setFile(e.target.files?.[0] ?? null)
@@ -432,10 +437,10 @@ export default function App() {
                           ? 'Enviando…'
                           : state === 'ready'
                             ? 'Preencher com áudio'
-                            : 'Enviar correção'}
+                            : 'Enviar áudio de correção'}
                       </button>
                     </form>
-                  </details>
+                  </section>
                 )}
 
                 <section className="conversation" aria-label="Mensagens da sessão">

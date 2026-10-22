@@ -40,6 +40,13 @@ class Model:
                         {"field": "city", "value": "Quixadá", "source_text": "Quixadá"},
                     )
                 ],
+                [
+                    ToolCall(
+                        "audio-correction",
+                        "fill_field",
+                        {"field": "city", "value": "Sobral", "source_text": "Sobral"},
+                    )
+                ],
             ]
         )
 
@@ -54,10 +61,13 @@ class Model:
 
 
 class Speech:
-    def transcribe(self, audio, settings):
-        return EngineTranscription(
-            "simulated", "1", "Meu nome é Ana. Moro em Fortaleza.", "pt", 1.0, 0.1, ()
+    def __init__(self):
+        self.texts = iter(
+            ["Meu nome é Ana. Moro em Fortaleza.", "Corrija minha cidade para Sobral"]
         )
+
+    def transcribe(self, audio, settings):
+        return EngineTranscription("simulated", "1", next(self.texts), "pt", 1.0, 0.1, ())
 
 
 async def test_browser_upload_correct_confirm_and_close(tmp_path):
@@ -124,6 +134,34 @@ async def test_browser_upload_correct_confirm_and_close(tmp_path):
                 await page.get_by_role("button", name="Enviar mensagem", exact=True).click()
                 await expect(page.get_by_label("Cidade", exact=True)).to_have_value("Quixadá")
                 await expect(page.get_by_label("Nome completo")).to_have_value("Ana")
+                # Audio correction is visible without expanding a hidden section.
+                await expect(
+                    page.get_by_role("heading", name="Corrigir campo por áudio", exact=True)
+                ).to_be_visible()
+                audio_correction = page.get_by_role(
+                    "button", name="Enviar áudio de correção", exact=True
+                )
+                await expect(audio_correction).to_be_visible()
+                await expect(audio_correction).to_be_disabled()
+                await page.locator("#audio-file").set_input_files(
+                    {"name": "correcao.wav", "mimeType": "audio/wav", "buffer": audio.getvalue()}
+                )
+                async with page.expect_response(
+                    lambda response: (
+                        response.url.endswith(f"/{sid}/corrections/audio")
+                        and response.request.method == "POST"
+                    )
+                ) as audio_response:
+                    await audio_correction.click()
+                assert (await audio_response.value).status == 202
+                await expect(page.get_by_label("Cidade", exact=True)).to_have_value("Sobral")
+                await expect(page.get_by_label("Nome completo")).to_have_value("Ana")
+                await expect(page.get_by_label("E-mail", exact=True)).to_have_value("")
+                assert list(manager.sessions) == [sid]
+                assert [t["kind"] for t in manager.sessions[sid].transcriptions] == [
+                    "initial",
+                    "correction",
+                ]
                 screenshots = PROJECT_ROOT / "reports/web-ui"
                 screenshots.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=str(screenshots / "desktop.png"), full_page=True)
