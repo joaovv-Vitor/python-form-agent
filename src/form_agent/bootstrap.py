@@ -39,7 +39,9 @@ class Application:
 
 
 def create_application(
-    *, events: EventSink = discard_event, browser_config: BrowserConfig | None = None,
+    *,
+    events: EventSink = discard_event,
+    browser_config: BrowserConfig | None = None,
     model_config: ModelConfig | None = None,
 ) -> Application:
     config = model_config or load_model_config()

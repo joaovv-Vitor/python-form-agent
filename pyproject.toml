@@ -19,12 +19,15 @@ dependencies = [
 
 [project.optional-dependencies]
 audio = ["faster-whisper>=1.1,<2"]
-test = ["pytest>=8,<10", "pytest-asyncio>=0.26,<2"]
+web = ["fastapi==0.161.0", "uvicorn==0.52.4", "python-multipart==0.0.32", "av>=14,<19"]
+test = ["pytest>=8,<10", "pytest-asyncio>=0.26,<2", "httpx>=0.28,<1", "form-agent-poc-python[web]"]
 dev = [
   "mypy>=1.15,<2",
   "pytest>=8,<10",
   "pytest-asyncio>=0.26,<2",
   "ruff>=0.12,<1",
+  "httpx>=0.28,<1",
+  "form-agent-poc-python[web]",
 ]
 
 [project.scripts]
@@ -34,16 +37,18 @@ pipeline-evaluate-py = "voice_form.evaluation:main"
 voice-form-agent-py = "voice_form.cli:main"
 form-agent-py = "form_agent.cli:main"
 form-evaluate-py = "form_agent.evaluation.runner:main"
+form-web-py = "web_api.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "form_agent.prompts" = ["*.txt"]
+"web_api" = ["assets/*.html", "assets/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["audio_agent*", "form_agent*", "voice_form*"]
+include = ["audio_agent*", "form_agent*", "voice_form*", "web_api*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -64,7 +69,7 @@ ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src/audio_agent", "src/form_agent", "src/voice_form"]
+files = ["src/audio_agent", "src/form_agent", "src/voice_form", "src/web_api"]
 check_untyped_defs = true
 disallow_untyped_defs = true
 no_implicit_optional = true

@@ -1,0 +1,13 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Cadastro Python</title>
+<style>body{font:16px system-ui;background:#f4f6f8;padding:2rem}main{max-width:42rem;margin:auto;background:white;padding:2rem}form,.field{display:grid;gap:.7rem}input,select,button{padding:.7rem}.terms{display:flex;gap:.5rem}</style></head><body><main><h1>Cadastro</h1>
+<form id="registrationForm">
+<div class="field"><label for="fullName">Nome completo</label><input id="fullName" name="fullName"></div>
+<div class="field"><label for="email">E-mail</label><input id="email" name="email" type="email"></div>
+<div class="field"><label for="phone">Telefone</label><input id="phone" name="phone" type="tel"></div>
+<div class="field"><label for="birthDate">Data de nascimento</label><input id="birthDate" name="birthDate" type="date"></div>
+<div class="field"><label for="city">Cidade</label><input id="city" name="city"></div>
+<div class="field"><label for="state">Estado</label><select id="state" name="state"><option value="">Selecione</option><option value="CE">Ceará</option><option value="PB">Paraíba</option><option value="PE">Pernambuco</option><option value="PI">Piauí</option><option value="RN">Rio Grande do Norte</option></select></div>
+<div class="terms"><input id="acceptTerms" name="acceptTerms" type="checkbox"><label for="acceptTerms">Aceito os termos</label></div>
+<button id="submitButton" name="submitButton" type="submit">Enviar</button><output id="submit-status"></output></form>
+<script>registrationForm.addEventListener('submit',e=>{e.preventDefault();document.querySelector('#submit-status').dataset.formAgentSubmitted='true';document.querySelector('#submit-status').textContent='Formulário enviado (simulação).'})</script>
+</main></body></html>
