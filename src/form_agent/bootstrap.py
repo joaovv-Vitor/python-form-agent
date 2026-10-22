@@ -39,9 +39,10 @@ class Application:
 
 
 def create_application(
-    *, events: EventSink = discard_event, browser_config: BrowserConfig | None = None
+    *, events: EventSink = discard_event, browser_config: BrowserConfig | None = None,
+    model_config: ModelConfig | None = None,
 ) -> Application:
-    config = load_model_config()
+    config = model_config or load_model_config()
     client = BrowserToolsClient(browser_config=browser_config or load_browser_config())
     model = OpenAICompatibleModel(config)
     agent = FormAgent(client, model, max_turns=load_agent_max_turns(), events=events)

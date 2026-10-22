@@ -17,6 +17,7 @@ from form_agent.core.schemas import (
     ToolCall,
 )
 from form_agent.experiments import RunTrace
+from voice_form.interaction import ReviewInput
 from voice_form.normalization import normalize_spoken_data
 from voice_form.review import ReviewSession
 
@@ -282,6 +283,23 @@ async def test_provider_error_leaves_browser_unchanged_and_user_can_exit():
     assert not tools.calls and tools.inspection == snapshot
     assert result.form.verification_complete and not result.completed
     assert result.records[0].status == "rejected"
+
+
+async def test_web_text_cannot_open_a_server_file_or_execute_terminal_commands():
+    tools = Tools(field("city", value="Fortaleza"))
+    speech = Speech()
+    model = Model([], [])
+    review, _, _ = session(
+        tools,
+        model,
+        ReviewInput("text", "AUDIO /private/audio.wav"),
+        ReviewInput("text", "CONCLUIR"),
+        ReviewInput("close"),
+        speech=speech,
+    )
+    result = await review.run(initial(tools), ())
+    assert not speech.calls and not tools.calls and not result.completed
+    assert len(model.requests) == 2
 
 
 async def test_audio_correction_is_transcribed_separately_and_original_evidence_is_preserved(

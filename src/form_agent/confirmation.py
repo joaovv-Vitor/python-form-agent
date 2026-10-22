@@ -8,6 +8,29 @@ from .bootstrap import Application
 from .core.schemas import AgentResult, JsonObject
 
 
+async def submit_confirmed(application: Application, result: AgentResult) -> JsonObject:
+    """Host-only operation shared by the CLI and an explicitly confirmed web request."""
+    inspection = result.final_inspection
+    buttons = (
+        [b for b in inspection.buttons if b.type == "submit" and not b.disabled]
+        if inspection
+        else []
+    )
+    if len(buttons) != 1 or not result.verification_complete or result.turn_limit_reached:
+        return {
+            "success": False,
+            "code": "SUBMISSION_BLOCKED",
+            "error": "Revisão incompleta ou botão ambíguo",
+        }
+    await application.client.set_submission_authorized(True)
+    try:
+        return await application.agent.submit(
+            result, buttons[0].id or buttons[0].label, authorized=True
+        )
+    finally:
+        await application.client.set_submission_authorized(False)
+
+
 async def confirm_submission(application: Application, result: AgentResult) -> JsonObject:
     inspection = result.final_inspection or result.inspection
     buttons = [
@@ -31,10 +54,4 @@ async def confirm_submission(application: Application, result: AgentResult) -> J
         answer = ""
     if answer.strip() != "ENVIAR":
         return {"success": False, "code": "SUBMISSION_BLOCKED", "error": "Envio não confirmado"}
-    await application.client.set_submission_authorized(True)
-    try:
-        return await application.agent.submit(
-            result, buttons[0].id or buttons[0].label, authorized=True
-        )
-    finally:
-        await application.client.set_submission_authorized(False)
+    return await submit_confirmed(application, result)

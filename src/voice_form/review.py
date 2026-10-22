@@ -8,7 +8,6 @@ import time
 import unicodedata
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
 
 from audio_agent.agent import AudioAgent
 from audio_agent.models import TranscriptionSettings
@@ -27,9 +26,10 @@ from form_agent.core.schemas import (
     ToolDefinition,
 )
 
-from .clarification import Ask, field_kind, terminal_answer
+from .clarification import field_kind, terminal_answer
 from .context import contextualize
 from .extraction import ExtractionResult
+from .interaction import ReviewAsk, ReviewInput, terminal_input
 from .normalization import FieldKind, NormalizationResult, normalize_field_value
 
 REVIEW_VERSION = "form-review-v1"
@@ -151,7 +151,7 @@ class ReviewSession:
         audio: AudioAgent,
         settings: TranscriptionSettings,
         *,
-        ask: Ask = terminal_answer,
+        ask: ReviewAsk = terminal_answer,
         notify: Callable[[str], None] = print,
         auto_context: bool = True,
         events: EventSink = discard_event,
@@ -194,14 +194,29 @@ class ReviewSession:
             "Comandos: MOSTRAR, PENDENCIAS, PULAR, CONCLUIR ou ENCERRAR."
         )
         while True:
+            self.events(
+                "review_waiting",
+                {
+                    "final_inspection": expected.to_dict(),
+                    "issues": [asdict(i) for i in (*active, *_native_issues(expected))],
+                    "question": question,
+                },
+            )
             try:
-                answer = (
-                    await self.ask(f"{question}\nRevisão> " if question else "Revisão> ")
-                ).strip()
+                raw = await self.ask(f"{question}\nRevisão> " if question else "Revisão> ")
+                entry = terminal_input(raw) if isinstance(raw, str) else raw
             except EOFError:
-                answer = "ENCERRAR"
+                entry = ReviewInput("close")
+            answer = entry.text
             self.events("review_input", {"text": answer})
-            command = _fold(answer).rstrip(".!?")
+            command = {
+                "show": "mostrar",
+                "pending": "pendencias",
+                "skip": "pular",
+                "complete": "concluir",
+                "close": "encerrar",
+                "send": "enviar",
+            }.get(entry.kind, "")
             text = answer
             audio_file: str | None = None
             field: FormField | None = None
@@ -245,12 +260,13 @@ class ReviewSession:
                         "Use CONCLUIR. O envio exige --confirm-submit e confirmação separada por ENVIAR."
                     )
                     continue
-                if not text:
+                if not text and entry.kind != "audio":
                     continue
                 checking = False
-                audio_match = re.match(r"^(?:audio|áudio)\s+(.+)$", answer, re.IGNORECASE)
-                if audio_match:
-                    path = Path(audio_match[1].strip().strip('"').strip("'")).expanduser()
+                if entry.kind == "audio":
+                    path = entry.audio_path
+                    if path is None:
+                        raise ValueError("Arquivo de correção ausente.")
                     audio_file = str(path)
                     settings = (
                         contextualize(self.settings, expected)

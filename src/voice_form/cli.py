@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 from collections.abc import Sequence
-from dataclasses import replace
 from pathlib import Path
 
 from audio_agent.agent import AudioAgent
@@ -25,6 +24,7 @@ from .extraction import create_extractor
 from .normalization import DATA_NORMALIZATION_VERSION
 from .pipeline import AudioFormPipeline
 from .review import REVIEW_VERSION, ReviewSession
+from .service import apply_review
 
 
 async def run(arguments: argparse.Namespace) -> int:
@@ -118,16 +118,7 @@ async def run(arguments: argparse.Namespace) -> int:
                     denied=denied,
                 )
                 review_completed, denied = reviewed.completed, reviewed.submission_denied
-                result = replace(
-                    result,
-                    form=reviewed.form,
-                    issues=reviewed.issues,
-                    initial_issues=result.initial_issues or result.issues,
-                    review_records=reviewed.records,
-                    review_seconds=reviewed.seconds,
-                    total_seconds=result.total_seconds + reviewed.seconds,
-                    post_stt_seconds=result.post_stt_seconds + reviewed.seconds,
-                )
+                result = apply_review(result, reviewed)
                 print(reviewed.form.message)
             if (
                 arguments.confirm_submit
