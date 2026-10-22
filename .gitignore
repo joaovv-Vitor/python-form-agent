@@ -56,3 +56,9 @@ evaluation/audio/audios/**
 .idea/
 .vscode/
 .DS_Store
+
+# Web development
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
