@@ -595,12 +595,17 @@ export default function App() {
                 {canUpload && (
                   <section className="audio-section" aria-labelledby="audio-title">
                     <h3 id="audio-title">
-                      {state === 'ready' ? 'Gravar ou enviar áudio' : 'Corrigir campo por áudio'}
+                      {state === 'ready'
+                        ? 'Gravar ou enviar áudio'
+                        : session.phase === 'clarification'
+                          ? 'Responder por áudio'
+                          : 'Corrigir campo por áudio'}
                     </h3>
                     {state !== 'ready' && (
                       <p className="instructions" id="audio-correction-help">
-                        Grave ou envie um áudio dizendo qual campo deseja corrigir e o novo valor.
-                        Ex.: “Corrija minha cidade para Quixadá”. Os outros campos são mantidos.
+                        {session.phase === 'clarification'
+                          ? 'Grave ou envie um áudio respondendo à pergunta do assistente. Os dados já preenchidos são mantidos.'
+                          : 'Grave ou envie um áudio dizendo qual campo deseja corrigir e o novo valor. Ex.: “Corrija minha cidade para Quixadá”. Os outros campos são mantidos.'}
                       </p>
                     )}
                     <AudioRecorder
@@ -627,7 +632,9 @@ export default function App() {
                             ? file.name
                             : state === 'ready'
                               ? 'Selecionar arquivo de áudio'
-                              : 'Selecionar áudio de correção'}
+                              : session?.phase === 'clarification'
+                                ? 'Selecionar áudio de resposta'
+                                : 'Selecionar áudio de correção'}
                         </strong>
                         <small>
                           WAV, MP3, MP4, M4A, FLAC, WebM ou OGG · até{' '}
@@ -677,7 +684,9 @@ export default function App() {
                           ? 'Enviando…'
                           : state === 'ready'
                             ? 'Preencher com áudio'
-                            : 'Enviar áudio de correção'}
+                            : session?.phase === 'clarification'
+                              ? 'Enviar resposta por áudio'
+                              : 'Enviar áudio de correção'}
                       </button>
                     </form>
                   </section>

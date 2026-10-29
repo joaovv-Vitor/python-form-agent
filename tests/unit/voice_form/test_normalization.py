@@ -1,6 +1,6 @@
 import pytest
 
-from voice_form.normalization import normalize_spoken_data
+from voice_form.normalization import normalize_field_value, normalize_spoken_data
 
 
 @pytest.mark.parametrize(
@@ -113,6 +113,30 @@ def test_ambiguous_or_invalid_values_become_pending_without_guessing(text):
     assert result.to_dict()["fields"][0]["source_text"] == result.fields[0].source_text
 
 
+@pytest.mark.parametrize("ending", [".", "!", "?", ";"])
+def test_email_answer_accepts_stt_sentence_punctuation(ending):
+    value, rules, reason = normalize_field_value(
+        "email", f"joão, arroba, example, ponto com{ending}"
+    )
+    assert value == "joao@example.com" and reason is None
+    assert "email_trailing_sentence_punctuation" in rules
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "ana.example.com.",
+        "ana arroba example ponto com ou bia arroba example ponto com.",
+        "ana..silva@example.com.",
+        "ana@example.com..",
+        "ana arroba example ponto.",
+    ],
+)
+def test_sentence_punctuation_does_not_repair_ambiguous_email(answer):
+    value, _, reason = normalize_field_value("email", answer)
+    assert value is None and reason
+
+
 def test_only_representation_is_changed_not_domain_spelling():
     result = normalize_spoken_data("E-mail: ana arroba jimeio ponto com")
     assert result.fields[0].value == "ana@jimeio.com"
@@ -126,7 +150,7 @@ def test_email_ascii_convention_is_traced_and_does_not_change_the_person_name():
     assert result.instruction == "Meu nome é João Pedro. Meu e-mail é joao.pedro@gmail.com."
     assert result.fields[0].source_text == "joão.pedro arroba gmail.com"
     assert "email_local_remove_accents" in result.fields[0].rules
-    assert result.version == "spoken-data-pt-BR-v3"
+    assert result.version == "spoken-data-pt-BR-v4"
 
 
 def test_multiple_fields_keep_names_city_terms_and_submission_instruction():

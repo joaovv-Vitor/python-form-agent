@@ -16,6 +16,16 @@ from typing import Any
 from form_agent.core.errors import ToolClientError
 from form_agent.core.schemas import FormInspection, JsonObject, ToolDefinition
 
+# Public identity derived from the manifest's public key, not an API secret.
+EXTENSION_ID = "kelpboijhmnmacphlmcfafnjconljccj"
+
+
+def extension_origin(headers: Mapping[str, str]) -> str:
+    client = headers.get("x-vozform-client", "")
+    if client != EXTENSION_ID or headers.get("origin") != f"chrome-extension://{EXTENSION_ID}":
+        raise ValueError("Conecte pela extensão VozForm atualizada no Chrome.")
+    return f"extension:{client}"
+
 
 def extension_owner(headers: Mapping[str, str], token: str) -> str:
     client = headers.get("x-vozform-client", "")
@@ -24,9 +34,9 @@ def extension_owner(headers: Mapping[str, str], token: str) -> str:
     if (
         not authorization.startswith("Bearer ")
         or not re.fullmatch(r"[a-p]{32}", client)
-        or not secrets.compare_digest(supplied, token)
+        or not secrets.compare_digest(supplied.encode(), token.encode())
     ):
-        raise ValueError("Conecte a extensão com o código exibido pelo servidor.")
+        raise ValueError("Reconecte a extensão ao servidor local.")
     origin = headers.get("origin", "")
     if origin and origin != f"chrome-extension://{client}":
         raise ValueError("Origem da extensão não permitida.")

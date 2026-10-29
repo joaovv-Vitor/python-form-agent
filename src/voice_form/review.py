@@ -26,9 +26,10 @@ from form_agent.core.schemas import (
     ToolDefinition,
 )
 
-from .clarification import field_kind, terminal_answer
+from .clarification import terminal_answer
 from .context import contextualize
 from .extraction import ExtractionResult
+from .fields import field_kind
 from .interaction import ReviewAsk, ReviewInput, terminal_input
 from .normalization import FieldKind, NormalizationResult, normalize_field_value
 

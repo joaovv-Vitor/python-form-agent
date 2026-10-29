@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+import re
 import socket
 import wave
 
@@ -274,17 +275,25 @@ async def test_chrome_extension_fills_real_tab_corrects_and_preserves_web(web_ru
             assert not (await worker.evaluate("chrome.sidePanel.getPanelBehavior()"))[
                 "openPanelOnActionClick"
             ]
-            setup = await context.new_page()
-            await setup.goto(f"{url}/extension/setup")
-            code = await setup.locator("#pairing").input_value()
-            await setup.close()
+            await panel.get_by_text("Configurações do servidor", exact=True).click()
             await panel.get_by_label("Servidor local").fill(url)
-            await panel.get_by_label("Código de conexão").fill(code)
+            assert await panel.get_by_label("Código de conexão").count() == 0
             await target.bring_to_front()
             await panel.get_by_role("button", name="Usar formulário desta aba").click()
             await expect(
-                panel.get_by_role("button", name="Usar microfone", exact=True)
+                panel.get_by_role("button", name=re.compile("^(Ativar|Usar) microfone$"))
             ).to_be_enabled(timeout=15000)
+            activation = panel.get_by_role("button", name="Ativar microfone", exact=True)
+            if await activation.count():
+                async with context.expect_page() as permission_page:
+                    await activation.click()
+                permission = await permission_page.value
+                await permission.get_by_role(
+                    "button", name="Permitir microfone", exact=True
+                ).click()
+                await expect(
+                    panel.get_by_role("button", name="Usar microfone", exact=True)
+                ).to_be_enabled()
             session = next(iter(manager.sessions.values()))
             assert session.bridge is not None
             assert session.public()["transport"] == "extension"
@@ -371,6 +380,235 @@ async def test_chrome_extension_fills_real_tab_corrects_and_preserves_web(web_ru
             web_page = await context.new_page()
             await web_page.goto(url)
             await expect(web_page.get_by_label("Nome completo")).to_be_visible(timeout=15000)
+        finally:
+            await context.close()
+
+
+async def test_extension_microphone_answers_missing_data_then_corrects(web_runtime, tmp_path):
+    manager, url = web_runtime
+    extension = PROJECT_ROOT / "extension/dist"
+    if not (extension / "manifest.json").is_file():
+        pytest.skip("Execute npm run build:extension em frontend/ antes do teste da extensão.")
+    manager.audio._engine.texts = iter(
+        [
+            "Meu nome é Ana. Moro em Fortaleza. Meu e-mail é ana.example.com.",
+            "ana, arroba, example, ponto com.",
+            "Corrija minha cidade para Quixadá",
+        ]
+    )
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            tmp_path / "chrome",
+            channel="chromium",
+            headless=True,
+            args=[
+                f"--disable-extensions-except={extension}",
+                f"--load-extension={extension}",
+                "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream",
+            ],
+        )
+        try:
+            worker = (
+                context.service_workers[0]
+                if context.service_workers
+                else await context.wait_for_event("serviceworker")
+            )
+            extension_id = worker.url.split("/")[2]
+            target = await context.new_page()
+            await target.goto(f"{url}/forms/cadastro")
+            await target.locator("#email").evaluate("""field => {
+                field.type = 'text';
+                field.required = false;
+                document.querySelector('label[for="email"]').textContent = 'Email Address';
+            }""")
+            panel = await context.new_page()
+            await panel.goto(f"chrome-extension://{extension_id}/extension.html")
+            await panel.get_by_text("Configurações do servidor", exact=True).click()
+            await panel.get_by_label("Servidor local").fill(url)
+            await target.bring_to_front()
+            await panel.get_by_role("button", name="Usar formulário desta aba").click()
+            activation = panel.get_by_role("button", name="Ativar microfone", exact=True)
+            await expect(activation).to_be_enabled(timeout=15000)
+            async with context.expect_page() as permission_page:
+                await activation.click()
+            permission = await permission_page.value
+            await permission.get_by_role("button", name="Permitir microfone", exact=True).click()
+            microphone = panel.get_by_role("button", name="Usar microfone", exact=True)
+            await expect(microphone).to_be_enabled()
+            session = next(iter(manager.sessions.values()))
+            errors = []
+            panel.on("pageerror", lambda error: errors.append(str(error)))
+
+            async def record_and_send(label):
+                await expect(microphone).to_be_enabled()
+                await microphone.click()
+                stop = panel.get_by_role("button", name="Parar gravação", exact=True)
+                await expect(stop).to_be_visible()
+                await asyncio.sleep(0.3)
+                await stop.click()
+                await expect(panel.locator("audio")).to_be_visible()
+                await panel.get_by_role("button", name=label, exact=True).click()
+
+            await record_and_send("Preencher com áudio")
+            await expect(panel.get_by_role("heading", name="Responder por áudio")).to_be_visible(
+                timeout=20000
+            )
+            assert session.public()["phase"] == "clarification"
+            await expect(panel.locator("#audio-file")).to_be_enabled()
+            await expect(target.locator("#fullName")).to_have_value("Ana")
+            await expect(target.locator("#city")).to_have_value("Fortaleza")
+            await record_and_send("Enviar resposta por áudio")
+            await expect(target.locator("#email")).to_have_value("ana@example.com", timeout=15000)
+            await expect(panel.get_by_role("heading", name="Corrigir por áudio")).to_be_visible()
+            await record_and_send("Enviar áudio de correção")
+            await expect(target.locator("#city")).to_have_value("Quixadá", timeout=15000)
+            await expect(microphone).to_be_enabled()
+            await expect(target.locator("#fullName")).to_have_value("Ana")
+            await expect(target.locator("#email")).to_have_value("ana@example.com")
+            assert session.public()["can_correct_audio"]
+            assert len(session.transcriptions) == 3 and len(manager.sessions) == 1
+            assert not errors
+            await panel.get_by_role("button", name="Encerrar sessão", exact=True).click()
+            await expect(
+                panel.get_by_role("button", name="Usar formulário desta aba")
+            ).to_be_visible()
+        finally:
+            await context.close()
+
+
+@pytest.mark.parametrize("stale_permission_metadata", [False, True])
+async def test_extension_microphone_authorization_and_retry_without_auto_permission(
+    web_runtime, tmp_path, stale_permission_metadata
+):
+    manager, url = web_runtime
+    extension = PROJECT_ROOT / "extension/dist"
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            tmp_path / "chrome",
+            channel="chromium",
+            headless=True,
+            args=[
+                f"--disable-extensions-except={extension}",
+                f"--load-extension={extension}",
+                "--use-fake-device-for-media-stream",
+            ],
+        )
+        try:
+            worker = (
+                context.service_workers[0]
+                if context.service_workers
+                else await context.wait_for_event("serviceworker")
+            )
+            origin = f"chrome-extension://{worker.url.split('/')[2]}"
+            if stale_permission_metadata:
+                await context.add_init_script("""(() => {
+                    if (location.pathname !== '/extension.html') return;
+                    const original = navigator.permissions.query.bind(navigator.permissions);
+                    navigator.permissions.query = async descriptor => {
+                        if (descriptor.name !== 'microphone') return original(descriptor);
+                        const status = Object.assign(new EventTarget(), {state: 'prompt'});
+                        window.staleMicrophoneStatus = status;
+                        return status;
+                    };
+                })();""")
+            target = await context.new_page()
+            await target.goto(f"{url}/forms/cadastro")
+            panel = await context.new_page()
+            await panel.goto(f"{origin}/extension.html")
+            await panel.get_by_text("Configurações do servidor", exact=True).click()
+            await panel.get_by_label("Servidor local").fill(url)
+            await target.bring_to_front()
+            await panel.get_by_role("button", name="Usar formulário desta aba").click()
+            activate = panel.get_by_role("button", name="Ativar microfone", exact=True)
+            await expect(activate).to_be_enabled(timeout=15000)
+            async with context.expect_page() as opened:
+                await activate.click()
+            permission = await opened.value
+            await permission.wait_for_load_state()
+            if stale_permission_metadata:
+                # A panel may miss a runtime message while hidden or reopening.
+                await permission.evaluate("chrome.runtime.sendMessage = async () => undefined")
+            await permission.evaluate("""() => {
+                const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                let first = true;
+                navigator.mediaDevices.getUserMedia = options => {
+                    if (first) { first = false; return Promise.reject(new DOMException('Test blocked permission', 'NotAllowedError')); }
+                    return original(options);
+                };
+            }""")
+            await permission.get_by_role("button", name="Permitir microfone", exact=True).click()
+            await expect(permission.get_by_role("alert")).to_contain_text("bloqueou o microfone")
+            # Use Chromium's permission manager, not --use-fake-ui-for-media-stream.
+            # CDP treats chrome-extension: as opaque for an origin-specific grant.
+            # Scope this test grant to the isolated temporary browser context.
+            await context.grant_permissions(["microphone"])
+            await permission.get_by_role("button", name="Permitir microfone", exact=True).click()
+            await expect(
+                panel.get_by_role("button", name="Usar microfone", exact=True)
+            ).to_be_enabled(timeout=10000)
+            assert not permission.is_closed()
+            await expect(
+                permission.get_by_role("heading", name="Microfone autorizado", exact=True)
+            ).to_be_visible()
+            if stale_permission_metadata:
+                await panel.evaluate(
+                    "window.dispatchEvent(new Event('focus')); window.staleMicrophoneStatus?.dispatchEvent(new Event('change'))"
+                )
+                await expect(
+                    panel.get_by_role("button", name="Usar microfone", exact=True)
+                ).to_be_enabled()
+            await panel.evaluate("""() => {
+                window.capturedStreams = [];
+                const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia = async options => {
+                    const stream = await original(options); window.capturedStreams.push(stream); return stream;
+                };
+            }""")
+            await panel.get_by_role("button", name="Usar microfone", exact=True).click()
+            await expect(
+                panel.get_by_role("button", name="Parar gravação", exact=True)
+            ).to_be_visible()
+            await asyncio.sleep(0.4)
+            await panel.get_by_role("button", name="Parar gravação", exact=True).click()
+            await expect(panel.locator("audio")).to_be_visible()
+            assert await panel.evaluate(
+                "window.capturedStreams.length === 1 && window.capturedStreams.every(s => s.getTracks().every(t => t.readyState === 'ended'))"
+            )
+            assert not next(iter(manager.sessions.values())).transcriptions
+            session = next(iter(manager.sessions.values()))
+            await panel.get_by_role("button", name="Encerrar sessão", exact=True).click()
+            await expect(
+                panel.get_by_role("button", name="Usar formulário desta aba")
+            ).to_be_visible()
+            await asyncio.wait_for(session.close_task, 2)
+            if stale_permission_metadata:
+                # Reopening the panel must recover a completed authorization,
+                # even if its original runtime notification was never received.
+                await panel.reload()
+                await panel.get_by_text("Configurações do servidor", exact=True).click()
+                await expect(panel.get_by_label("Servidor local")).to_have_value(url)
+                await target.bring_to_front()
+                await panel.get_by_role("button", name="Usar formulário desta aba").click()
+                await expect(
+                    panel.get_by_role("button", name="Usar microfone", exact=True)
+                ).to_be_enabled(timeout=15000)
+                assert (
+                    await panel.get_by_role("button", name="Ativar microfone", exact=True).count()
+                    == 0
+                )
+                # A real capture denial invalidates the remembered confirmation.
+                await panel.evaluate(
+                    "() => { navigator.mediaDevices.getUserMedia = async () => {throw new DOMException('Revoked by test', 'NotAllowedError')}; }"
+                )
+                await panel.get_by_role("button", name="Usar microfone", exact=True).click()
+                await expect(
+                    panel.get_by_role("button", name="Ativar microfone", exact=True)
+                ).to_be_enabled()
+                await panel.wait_for_function(
+                    "async () => (await chrome.storage.local.get('microphoneAuthorized')).microphoneAuthorized === false"
+                )
+                await expect(panel.locator("#audio-file")).to_be_enabled()
         finally:
             await context.close()
 

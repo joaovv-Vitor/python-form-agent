@@ -12,8 +12,8 @@
     "build:extension": "tsc --noEmit && vite build --config vite.extension.config.ts",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "format": "prettier --write src tests index.html extension.html vite.config.ts vite.extension.config.ts tsconfig.json package.json ../extension/public",
-    "format:check": "prettier --check src tests index.html extension.html vite.config.ts vite.extension.config.ts tsconfig.json package.json ../extension/public"
+    "format": "prettier --write src tests index.html extension.html microphone.html vite.config.ts vite.extension.config.ts tsconfig.json package.json ../extension/public",
+    "format:check": "prettier --check src tests index.html extension.html microphone.html vite.config.ts vite.extension.config.ts tsconfig.json package.json ../extension/public"
   },
   "dependencies": {
     "react": "^19.0.0",

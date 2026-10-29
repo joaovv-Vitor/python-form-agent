@@ -40,6 +40,24 @@ def test_vocabulary_comes_from_schema_without_current_values_or_buttons():
         assert excluded not in result.initial_prompt + result.hotwords
 
 
+@pytest.mark.parametrize(
+    "label,name,placeholder",
+    [
+        ("Email Address", "contact", None),
+        ("Contato", "email", None),
+        ("Contato", "contact", "E-mail"),
+    ],
+)
+def test_email_text_field_supplies_spoken_separator_hints(label, name, placeholder):
+    inventory = FormInspection(
+        "https://example.com/form",
+        (FormField(label, name, "contact", "text", "textbox", placeholder=placeholder),),
+    )
+    result = contextualize(TranscriptionSettings(), inventory)
+    assert "arroba @ ponto ." in result.hotwords
+    assert label in result.initial_prompt
+
+
 def test_ineligible_fields_are_excluded_and_empty_form_adds_no_context():
     inventory = FormInspection(
         "file:///form",

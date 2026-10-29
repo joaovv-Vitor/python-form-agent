@@ -1,12 +1,16 @@
 import asyncio
+import base64
+import hashlib
+import json
 
 import httpx
 import pytest
 from test_sessions import web
 
+from form_agent.config import PROJECT_ROOT
 from form_agent.core.errors import ToolClientError
 from web_api.app import create_app
-from web_api.extension import ExtensionToolsClient, extension_owner
+from web_api.extension import EXTENSION_ID, ExtensionToolsClient, extension_owner
 
 
 def headers(token, client="a" * 32, **extra):
@@ -84,7 +88,8 @@ async def test_extension_sessions_are_isolated_from_web_and_close_without_a_repl
         paired = headers(app.state.extension_token, Origin="chrome-extension://" + "a" * 32)
         assert (await client.get("/extension/setup")).status_code == 403
         setup = await client.get("http://127.0.0.1/extension/setup")
-        assert app.state.extension_token in setup.text
+        assert app.state.extension_token not in setup.text
+        assert 'id="pairing"' not in setup.text
         assert setup.headers["cache-control"] == "no-store"
         assert (
             await client.post(
@@ -129,7 +134,7 @@ async def test_extension_sessions_are_isolated_from_web_and_close_without_a_repl
         assert not manager.sessions[existing["id"]].closing
 
 
-async def test_extension_code_rotates_between_server_starts(tmp_path):
+async def test_internal_credential_rotates_between_server_starts(tmp_path):
     async with web(tmp_path) as (_, manager, _, _):
         first = create_app(manager.config, manager=manager)
         second = create_app(manager.config, manager=manager)
@@ -139,3 +144,37 @@ async def test_extension_code_rotates_between_server_starts(tmp_path):
         ) as client:
             response = await client.get("/api/health", headers=headers(first.state.extension_token))
             assert response.status_code == 401
+
+
+def test_manifest_identity_matches_the_trusted_server_identity():
+    manifest = json.loads((PROJECT_ROOT / "extension/public/manifest.json").read_text())
+    fingerprint = hashlib.sha256(base64.b64decode(manifest["key"])).hexdigest()[:32]
+    assert "".join(chr(ord("a") + int(char, 16)) for char in fingerprint) == EXTENSION_ID
+
+
+async def test_automatic_connection_only_accepts_the_known_extension_origin_and_local_host(
+    tmp_path,
+):
+    async with web(tmp_path) as (client, _, _, _):
+        trusted = {"Origin": f"chrome-extension://{EXTENSION_ID}", "X-VozForm-Client": EXTENSION_ID}
+        for origin, client_id in [
+            ("https://evil.example", EXTENSION_ID),
+            ("", EXTENSION_ID),
+            (f"chrome-extension://{'a' * 32}", "a" * 32),
+            (f"chrome-extension://{EXTENSION_ID}", "b" * 32),
+        ]:
+            response = await client.post(
+                "http://127.0.0.1/api/extension/connect",
+                headers={"Origin": origin, "X-VozForm-Client": client_id},
+            )
+            assert response.status_code == 401
+        assert (await client.post("/api/extension/connect", headers=trusted)).status_code == 401
+        connected = await client.post("http://127.0.0.1/api/extension/connect", headers=trusted)
+        assert connected.status_code == 200
+        token = connected.json()["token"]
+        assert (
+            await client.get(
+                "http://127.0.0.1/api/health",
+                headers=headers(token, EXTENSION_ID, Origin=trusted["Origin"]),
+            )
+        ).status_code == 200

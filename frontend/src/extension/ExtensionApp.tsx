@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { AudioRecorder } from '../components/AudioRecorder'
 import { ApiError, acceptSnapshot, labels, type Session } from '../services/api'
 import { prepareActiveForm } from './active-tab'
+import { ExtensionRecorder } from './ExtensionRecorder'
 
 type Connection = { server: string; token: string }
 type Binding = { id: string; tabId: number; connection: Connection }
@@ -58,7 +58,6 @@ const json = (value: object): RequestInit => ({
 
 export default function ExtensionApp() {
   const [server, setServer] = useState('http://127.0.0.1:8000')
-  const [token, setToken] = useState('')
   const [session, setSession] = useState<Session | null>(null)
   const [binding, setBinding] = useState<Binding | null>(null)
   const [error, setError] = useState('')
@@ -81,7 +80,6 @@ export default function ExtensionApp() {
     void chrome.storage.session.get('connection').then(({ connection }) => {
       if (mounted.current && connection) {
         setServer(connection.server)
-        setToken(connection.token)
       }
     })
     return () => {
@@ -151,7 +149,7 @@ export default function ExtensionApp() {
         if (cancelled) return
         setConnectionStatus('Sem conexão')
         setConnectionError(
-          `${(failure as Error).message} Confira se o servidor continua ligado e se o código de conexão está atualizado.`,
+          `${(failure as Error).message} Confira se o servidor continua ligado e conecte o formulário novamente.`,
         )
         if (failure instanceof ApiError && [401, 404].includes(failure.status)) {
           setBinding(null)
@@ -185,11 +183,29 @@ export default function ExtensionApp() {
     setError('')
     setConnectionError('')
     try {
-      const connection = { server: serverUrl(server), token: token.trim() }
-      if (!connection.token)
-        throw new Error('Cole o código da página Conectar extensão do servidor.')
+      const base = serverUrl(server)
       const page = await prepareActiveForm(chrome)
-      const health = await api<typeof limits>(connection, '/health')
+      let response: Response
+      try {
+        response = await fetch(`${base}/api/extension/connect`, {
+          method: 'POST',
+          credentials: 'omit',
+          headers: { 'X-VozForm-Client': chrome.runtime.id },
+          signal: AbortSignal.timeout(10000),
+        })
+      } catch {
+        throw new Error(
+          'Não foi possível conectar ao servidor local. Inicie o servidor Python e confira o endereço nas configurações abaixo.',
+        )
+      }
+      const health = await response.json()
+      if (!response.ok || typeof health.token !== 'string')
+        throw new Error(
+          typeof health.detail === 'string'
+            ? health.detail
+            : 'Atualize o servidor e a extensão para conectar automaticamente.',
+        )
+      const connection: Connection = { server: base, token: health.token }
       const next = await api<Session>(
         connection,
         '/extension/sessions',
@@ -199,7 +215,7 @@ export default function ExtensionApp() {
         await api(connection, `/sessions/${next.id}`, { method: 'DELETE' })
         return
       }
-      await chrome.storage.session.set({ connection })
+      await chrome.storage.session.set({ connection: { server: base } })
       setLimits(health)
       setSession(next)
       setFile(null)
@@ -273,43 +289,24 @@ export default function ExtensionApp() {
         </div>
       )}
       <section aria-label="Conectar servidor" className="card">
-        <label htmlFor="server">Servidor local</label>
-        <input
-          id="server"
-          type="url"
-          value={server}
-          disabled={active || working}
-          onChange={(event) => setServer(event.target.value)}
-        />
-        <label htmlFor="token">Código de conexão</label>
-        <input
-          id="token"
-          type="password"
-          autoComplete="off"
-          value={token}
-          disabled={active || working}
-          onChange={(event) => setToken(event.target.value)}
-        />
-        <button
-          className="link"
-          disabled={active || working}
-          onClick={() => {
-            try {
-              void chrome.tabs.create({ url: `${serverUrl(server)}/extension/setup` })
-            } catch (failure) {
-              setError((failure as Error).message)
-            }
-          }}
-        >
-          Obter código no servidor
-        </button>
+        <details>
+          <summary>Configurações do servidor</summary>
+          <label htmlFor="server">Servidor local</label>
+          <input
+            id="server"
+            type="url"
+            value={server}
+            disabled={active || working}
+            onChange={(event) => setServer(event.target.value)}
+          />
+        </details>
         {!active && (
           <button className="primary" disabled={working} onClick={() => void attach()}>
             {working ? 'Conectando…' : 'Usar formulário desta aba'}
           </button>
         )}
         <small>
-          Mantenha o servidor Python ligado. A página escolhida receberá os valores diretamente.
+          Conexão automática com o servidor Python local. Mantenha-o ligado durante o uso.
         </small>
       </section>
 
@@ -332,8 +329,25 @@ export default function ExtensionApp() {
             </button>
           </section>
           <section className="card" aria-label="Preencher por áudio">
-            <h2>{session.state === 'ready' ? 'Preencher por áudio' : 'Corrigir por áudio'}</h2>
-            <AudioRecorder
+            <h2>
+              {session.state === 'ready'
+                ? 'Preencher por áudio'
+                : session.phase === 'clarification'
+                  ? 'Responder por áudio'
+                  : 'Corrigir por áudio'}
+            </h2>
+            {session.phase === 'clarification' && session.question && <p>{session.question}</p>}
+            <ExtensionRecorder
+              tabId={binding!.tabId}
+              disabledReason={
+                working
+                  ? 'Aguarde a operação atual terminar para gravar.'
+                  : session.state === 'error'
+                    ? 'A sessão encontrou um erro. Encerre e conecte o formulário novamente.'
+                    : session.state === 'review_complete'
+                      ? 'A revisão já foi concluída. Encerre a sessão para iniciar outro preenchimento.'
+                      : 'Aguarde a preparação ou o processamento do formulário terminar para gravar.'
+              }
               disabled={!canAudio || working}
               maxSeconds={limits.max_audio_seconds}
               maxBytes={limits.max_upload_bytes}
@@ -365,7 +379,11 @@ export default function ExtensionApp() {
               disabled={!canAudio || !file || working || recording}
               onClick={upload}
             >
-              {session.state === 'ready' ? 'Preencher com áudio' : 'Enviar áudio de correção'}
+              {session.state === 'ready'
+                ? 'Preencher com áudio'
+                : session.phase === 'clarification'
+                  ? 'Enviar resposta por áudio'
+                  : 'Enviar áudio de correção'}
             </button>
           </section>
           {!!session.issues.filter((issue) => issue.code !== 'SUBMISSION_BLOCKED').length && (

@@ -275,6 +275,26 @@ async def test_review_resolves_skipped_clarification_after_verified_correction(
     assert result.form.final_inspection.fields[0].value == "ana@example.com"
 
 
+async def test_english_email_text_field_correction_resolves_initial_missing_separator():
+    tools = Tools(
+        replace(field("email", "text"), label="Email Address"),
+        field("city", value="Fortaleza"),
+    )
+    normalization = normalize_spoken_data("Meu e-mail é ana.example.com.")
+    source = "ana, arroba, example, ponto com."
+    review, _, _ = session(
+        tools,
+        Model([correction("email", "ana@example.com", source)]),
+        f"Corrija meu e-mail para {source}",
+        "CONCLUIR",
+    )
+    result = await review.run(initial(tools), normalization.issues, normalization=normalization)
+    assert result.completed and result.issues == ()
+    assert result.records[0].status == "applied"
+    assert result.form.final_inspection.fields[0].value == "ana@example.com"
+    assert result.form.final_inspection.fields[1].value == "Fortaleza"
+
+
 async def test_resolving_clarification_keeps_other_fields_pending():
     tools = Tools(
         field("email", "email", "", required=True),

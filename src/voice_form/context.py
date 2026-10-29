@@ -5,13 +5,15 @@ from dataclasses import replace
 from audio_agent.models import TranscriptionSettings
 from form_agent.core.schemas import FormInspection
 
+from .fields import field_kind
+
 MAX_PROMPT_CHARS = 450
 MAX_HOTWORDS_CHARS = 200
 MAX_FIELDS = 20
 
 TYPE_HINTS = {
     "email": "e-mail arroba @ ponto .",
-    "tel": "telefone celular DDD",
+    "phone": "telefone celular DDD",
     "date": "data dia mês ano",
     "datetime-local": "data dia mês ano horário",
     "time": "horário horas minutos",
@@ -48,7 +50,8 @@ def contextualize(
         and field.type not in {"hidden", "password", "file", "submit", "button", "reset", "image"}
     ][:MAX_FIELDS]
     labels = [_text(field.label or field.name or field.id or "") for field in fields]
-    type_hints = [TYPE_HINTS[field.type] for field in fields if field.type in TYPE_HINTS]
+    kinds = [field_kind(field) or field.type for field in fields]
+    type_hints = [TYPE_HINTS[kind] for kind in kinds if kind in TYPE_HINTS]
     options = [
         _text(option.label)
         for field in fields

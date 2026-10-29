@@ -194,6 +194,20 @@ dd {
   display: block;
   color: #a52b2b;
 }
+.extension-recorder {
+  display: grid;
+  gap: 10px;
+}
+.recorder-error {
+  color: #9b2424;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.permission-page {
+  max-width: 620px;
+  margin: 60px auto;
+  padding: 24px;
+}
 summary {
   cursor: pointer;
 }

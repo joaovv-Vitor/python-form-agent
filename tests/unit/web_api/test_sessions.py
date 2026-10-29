@@ -324,6 +324,151 @@ async def test_uploaded_audio_correction_uses_same_session(tmp_path):
         assert len(data["transcriptions"]) == 2 and speech.calls == 2 and len(apps) == 1
 
 
+async def test_missing_data_can_be_answered_by_audio_then_corrected_in_same_session(tmp_path):
+    async with web(
+        tmp_path,
+        batches=[
+            [call("fullName", "Ana"), call("city", "Fortaleza")],
+            [],
+            [call("city", "Sobral", "Sobral")],
+        ],
+        texts=[
+            "Meu nome é Ana. Moro em Fortaleza.",
+            "ana arroba example ponto com",
+            "Corrija minha cidade para Sobral",
+        ],
+    ) as (client, manager, apps, speech):
+        sid = await start(client)
+        tools = apps[0].client
+        tools.inspection = replace(
+            tools.inspection,
+            fields=tuple(
+                replace(f, required=True) if f.reference == "email" else f
+                for f in tools.inspection.fields
+            ),
+        )
+        assert (
+            await client.post(f"/api/sessions/{sid}/audio", files={"file": ("initial.wav", wav())})
+        ).status_code == 202
+        data = await wait(client, sid, "awaiting_answer")
+        assert data["phase"] == "clarification" and data["can_correct_audio"]
+        assert (
+            await client.post(
+                f"/api/sessions/{sid}/corrections/audio", files={"file": ("bad.wav", b"invalid")}
+            )
+        ).status_code == 422
+        assert (await client.get(f"/api/sessions/{sid}")).json()["can_correct_audio"]
+        response = await client.post(
+            f"/api/sessions/{sid}/corrections/audio", files={"file": ("answer.wav", wav())}
+        )
+        assert response.status_code == 202
+        data = await wait(client, sid, "reviewing")
+        values = {f["reference"]: f["value"] for f in data["fields"]}
+        assert (
+            values["email"] == "ana@example.com"
+            and values["fullName"] == "Ana"
+            and values["city"] == "Fortaleza"
+        )
+        assert data["can_correct_audio"] and data["can_complete"]
+        assert (
+            await client.post(
+                f"/api/sessions/{sid}/corrections/audio", files={"file": ("correction.wav", wav())}
+            )
+        ).status_code == 202
+        data = await wait(client, sid, "reviewing")
+        values = {f["reference"]: f["value"] for f in data["fields"]}
+        assert (
+            values["city"] == "Sobral"
+            and values["email"] == "ana@example.com"
+            and values["fullName"] == "Ana"
+        )
+        assert data["can_correct_audio"] and len(data["transcriptions"]) == 3
+        assert len(apps) == 1 and speech.calls == 3
+
+
+async def test_english_email_text_field_accepts_punctuated_audio_answer(tmp_path):
+    async with web(
+        tmp_path,
+        texts=[
+            "Meu nome é Ana. Moro em Fortaleza. Meu e-mail é ana.example.com.",
+            "ana, arroba, example, ponto com.",
+        ],
+    ) as (client, manager, apps, speech):
+        sid = await start(client)
+        tools = apps[0].client
+        tools.inspection = replace(
+            tools.inspection,
+            fields=tuple(
+                replace(f, type="text", label="Email Address") if f.reference == "email" else f
+                for f in tools.inspection.fields
+            ),
+        )
+        assert (
+            await client.post(f"/api/sessions/{sid}/audio", files={"file": ("initial.wav", wav())})
+        ).status_code == 202
+        data = await wait(client, sid, "awaiting_answer")
+        assert data["phase"] == "clarification" and "Email Address" in data["question"]
+        assert next(f for f in data["fields"] if f["reference"] == "email")["value"] == ""
+        assert (
+            await client.post(
+                f"/api/sessions/{sid}/corrections/audio", files={"file": ("answer.wav", wav())}
+            )
+        ).status_code == 202
+        data = await wait(client, sid, "reviewing")
+        assert (
+            next(f for f in data["fields"] if f["reference"] == "email")["value"]
+            == "ana@example.com"
+        )
+        assert next(f for f in data["fields"] if f["reference"] == "fullName")["value"] == "Ana"
+        assert data["issues"] == [] and data["can_correct_audio"]
+        assert speech.calls == 2 and len(apps) == 1
+
+
+async def test_clarification_audio_failure_allows_retry(tmp_path):
+    async with web(
+        tmp_path,
+        texts=["Meu nome é Ana. Moro em Fortaleza.", "ana arroba example ponto com"],
+    ) as (client, manager, apps, speech):
+        sid = await start(client)
+        tools = apps[0].client
+        tools.inspection = replace(
+            tools.inspection,
+            fields=tuple(
+                replace(f, required=True) if f.reference == "email" else f
+                for f in tools.inspection.fields
+            ),
+        )
+        await client.post(f"/api/sessions/{sid}/audio", files={"file": ("initial.wav", wav())})
+        await wait(client, sid, "awaiting_answer")
+        transcribe = speech.transcribe
+
+        def fail_once(audio, settings):
+            speech.transcribe = transcribe
+            raise RuntimeError("Simulated temporary transcription failure")
+
+        speech.transcribe = fail_once
+        assert (
+            await client.post(
+                f"/api/sessions/{sid}/corrections/audio", files={"file": ("answer.wav", wav())}
+            )
+        ).status_code == 202
+        data = await wait(client, sid, "awaiting_answer")
+        assert data["phase"] == "clarification" and data["can_correct_audio"]
+        assert any("Não foi possível transcrever a resposta" in m["text"] for m in data["messages"])
+        assert (
+            await client.post(
+                f"/api/sessions/{sid}/corrections/audio", files={"file": ("retry.wav", wav())}
+            )
+        ).status_code == 202
+        data = await wait(client, sid, "reviewing")
+        assert data["can_correct_audio"]
+        assert (
+            next(f for f in data["fields"] if f["reference"] == "email")["value"]
+            == "ana@example.com"
+        )
+        assert len(apps) == 1
+
+
 async def test_skipped_clarification_can_be_fixed_and_review_completed(tmp_path):
     async with web(
         tmp_path,

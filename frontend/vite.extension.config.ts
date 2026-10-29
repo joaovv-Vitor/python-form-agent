@@ -8,6 +8,6 @@ export default defineConfig({
   build: {
     outDir: '../extension/dist',
     emptyOutDir: true,
-    rollupOptions: { input: 'extension.html' },
+    rollupOptions: { input: ['extension.html', 'microphone.html'] },
   },
 })

@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "VozForm — formulários por voz",
-  "version": "0.1.1",
+  "version": "0.2.2",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3MaV2Jh3c6D5OzPdJ5CGlq48skRJ/pWZCZkEXgLz8WxoGi7Q+GWeSA/GBrtHO+ewiFoupm8y3mXW0q192GBpdpiXcWRf4Kakpzwtbtulzuz7/SjIoKJ85V6lblXrGfo3iV/X3Vh/cLGXvQtIweAYg202zvpg/rGJcTa0yQGr+L/xkGbzqsC5TZtXJTqfeYvlBqpikAEwXpcLju0mP5mNkMqa2P95nkUZT11G9wB22BVDOdNHB3JEOcL3OzXYhHK0s9cpeyYvCXbOACFi4HkTCK4r7Z0xwBfQqt/JkI/oqvWCtVSaRI6oUeG0b3Rj/7+jy/Wb/pZWMXXa6fdZGIcJVwIDAQAB",
   "minimum_chrome_version": "116",
   "description": "Preencha e revise formulários da aba atual por voz com seu servidor VozForm local.",
   "permissions": ["activeTab", "scripting", "sidePanel", "storage"],

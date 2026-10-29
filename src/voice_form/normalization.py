@@ -17,7 +17,7 @@ from text_to_num import alpha2digit  # type: ignore[import-untyped]
 
 from form_agent.core.schemas import RunIssue
 
-DATA_NORMALIZATION_VERSION = "spoken-data-pt-BR-v3"
+DATA_NORMALIZATION_VERSION = "spoken-data-pt-BR-v4"
 type FieldKind = Literal["email", "phone", "date"]
 
 # A connector is required so ordinary mentions ("não preencha o telefone")
@@ -120,6 +120,11 @@ class NormalizationResult:
 def _email(raw: str) -> tuple[str | None, tuple[str, ...], str | None]:
     value = raw.strip()
     rules: list[str] = []
+    # Sentence punctuation from STT is outside the address. Remove only one
+    # terminal mark; never change internal dots or infer an absent @.
+    value, count = re.subn(r"(?<=\w)[.!?;]$", "", value)
+    if count:
+        rules.append("email_trailing_sentence_punctuation")
     # Already-written compact addresses may legitimately contain "ponto" or
     # "arroba" in the local part. Spoken rules must not rewrite those names.
     if "@" not in value or re.search(r"\s", value):

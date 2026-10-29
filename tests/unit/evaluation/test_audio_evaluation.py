@@ -246,7 +246,7 @@ async def test_pending_data_is_reported_without_changing_stt_scoring(tmp_path, n
     assert row.wer == row.cer == 0
     if normalize_data:
         assert row.normalized_instruction == form.instruction
-        assert row.data_normalization_version == "spoken-data-pt-BR-v3"
+        assert row.data_normalization_version == "spoken-data-pt-BR-v4"
         assert row.normalization_seconds >= 0
         assert not row.passed
         assert not row.functional_success

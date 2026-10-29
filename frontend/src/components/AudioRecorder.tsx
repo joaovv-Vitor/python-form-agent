@@ -35,6 +35,7 @@ export function AudioRecorder({
   onRecorded,
   onBusyChange,
   onError,
+  onPermissionDenied,
 }: {
   disabled: boolean
   maxSeconds: number
@@ -42,14 +43,21 @@ export function AudioRecorder({
   onRecorded: (file: File) => void
   onBusyChange: (busy: boolean) => void
   onError: (message: string) => void
+  onPermissionDenied?: () => void
 }) {
   const [phase, setPhase] = useState<'idle' | 'requesting' | 'recording' | 'stopping'>('idle')
   const [elapsed, setElapsed] = useState(0)
+  const [recorderError, setRecorderError] = useState('')
   const capture = useRef<Capture | null>(null)
   const generation = useRef(0)
   const supported =
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
     typeof MediaRecorder !== 'undefined'
+
+  function reportError(message: string) {
+    setRecorderError(message)
+    onError(message)
+  }
 
   useEffect(() => {
     return () => {
@@ -81,6 +89,7 @@ export function AudioRecorder({
     let stream: MediaStream | undefined
     setPhase('requesting')
     setElapsed(0)
+    setRecorderError('')
     onBusyChange(true)
     onError('')
     try {
@@ -105,7 +114,7 @@ export function AudioRecorder({
         bytes += event.data.size
         if (bytes > maxBytes) {
           cancel()
-          onError('A gravação excedeu o tamanho permitido. Grave um áudio mais curto.')
+          reportError('A gravação excedeu o tamanho permitido. Grave um áudio mais curto.')
           return
         }
         chunks.push(event.data)
@@ -113,7 +122,7 @@ export function AudioRecorder({
       recorder.onerror = () => {
         if (generation.current !== current) return
         cancel()
-        onError('Não foi possível gravar o áudio. Tente novamente ou envie um arquivo.')
+        reportError('Não foi possível gravar o áudio. Tente novamente ou envie um arquivo.')
       }
       recorder.onstop = () => {
         if (generation.current !== current) return
@@ -130,7 +139,7 @@ export function AudioRecorder({
         setPhase('idle')
         onBusyChange(false)
         if (!bytes || !extension) {
-          onError('Não foi possível preparar a gravação. Tente novamente ou envie um arquivo.')
+          reportError('Não foi possível preparar a gravação. Tente novamente ou envie um arquivo.')
           return
         }
         const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -148,12 +157,15 @@ export function AudioRecorder({
       if (generation.current !== current) return
       cancel()
       const name = error instanceof DOMException ? error.name : ''
-      onError(
+      if (name === 'NotAllowedError' || name === 'SecurityError') onPermissionDenied?.()
+      reportError(
         name === 'NotAllowedError' || name === 'SecurityError'
           ? 'Permita o acesso ao microfone no navegador ou envie um arquivo de áudio.'
           : name === 'NotFoundError'
             ? 'Nenhum microfone foi encontrado. Conecte um microfone ou envie um arquivo.'
-            : 'Não foi possível acessar o microfone. Confira se ele está disponível ou envie um arquivo.',
+            : name === 'NotReadableError'
+              ? 'O microfone está indisponível. Confira as permissões do sistema e se outro programa está usando o dispositivo.'
+              : 'Não foi possível acessar o microfone. Confira se ele está disponível ou envie um arquivo.',
       )
     }
   }
@@ -208,6 +220,11 @@ export function AudioRecorder({
           ? 'O microfone precisa de um navegador compatível em HTTPS ou localhost. Você pode enviar um arquivo abaixo.'
           : 'Grave, pare e ouça antes de enviar. A gravação termina no limite de tempo.'}
       </p>
+      {recorderError && (
+        <p className="recorder-error" role="status">
+          {recorderError}
+        </p>
+      )}
     </div>
   )
 }

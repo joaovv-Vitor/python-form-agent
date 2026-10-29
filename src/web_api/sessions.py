@@ -32,6 +32,7 @@ from form_agent.core.interfaces import ToolClient
 from form_agent.core.schemas import FormInspection, JsonObject, ToolDefinition
 from form_agent.experiments import RunTrace, metadata
 from voice_form.clarification import ClarificationSession
+from voice_form.context import contextualize
 from voice_form.interaction import ReviewInput
 from voice_form.pipeline import AudioFormPipeline, PipelineResult
 from voice_form.review import ReviewSession
@@ -167,7 +168,9 @@ class Session:
             "phase": self.phase,
             "active_field": self.active_field,
             "can_message": self.waiting and not self.closing,
-            "can_correct_audio": self.waiting and self.phase == "review" and not self.closing,
+            "can_correct_audio": self.waiting
+            and self.phase in {"clarification", "review"}
+            and not self.closing,
             "can_complete": self.waiting and self.phase == "review" and not blocked,
             "can_submit": self.state == "review_complete"
             and self.target.demo
@@ -295,8 +298,45 @@ class Session:
 
     async def ask_clarification(self, prompt: str) -> str:
         self.phase = "clarification"
-        entry = await self._answer()
-        return {"skip": "PULAR", "close": "ENCERRAR"}.get(entry.kind, entry.text)
+        while True:
+            entry = await self._answer()
+            if entry.kind != "audio":
+                self.denied = self.denied or submission_denied(entry.text)
+                return {"skip": "PULAR", "close": "ENCERRAR"}.get(entry.kind, entry.text)
+            try:
+                if entry.audio_path is None:
+                    raise ValueError("Arquivo de resposta ausente.")
+                settings = (
+                    contextualize(self.settings, self.inspection)
+                    if self.inspection
+                    else self.settings
+                )
+                self.emit(
+                    "review_audio_started",
+                    {"path": str(entry.audio_path), "settings": settings.to_dict()},
+                )
+                transcription = await asyncio.to_thread(
+                    self.audio.transcribe, entry.audio_path, settings
+                )
+                if self.closing:
+                    return "ENCERRAR"
+                self.emit("review_audio_transcribed", transcription.to_dict())
+                text = transcription.text.strip()
+                if not text:
+                    self.notify(
+                        "Não reconheci uma resposta no áudio. Grave novamente ou responda por texto."
+                    )
+                    continue
+                self.notify(f"Transcrição da resposta: {text}")
+                self.denied = self.denied or submission_denied(text)
+                return text
+            except Exception:
+                if self.closing:
+                    return "ENCERRAR"
+                LOGGER.exception("Falha na transcrição da resposta da sessão %s", self.id)
+                self.notify(
+                    "Não foi possível transcrever a resposta. Grave outro áudio ou responda por texto."
+                )
 
     async def _answer(self) -> ReviewInput:
         if self.closing:
@@ -419,7 +459,7 @@ class Session:
                     "Não foi possível concluir o preenchimento com estado verificável. Encerre e inicie outra sessão."
                 )
                 return
-            self.denied = bool(
+            self.denied = self.denied or bool(
                 result.transcription and submission_denied(result.transcription.text)
             )
             self.snapshot(result.form.final_inspection or result.form.inspection)

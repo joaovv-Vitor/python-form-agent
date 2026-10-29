@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
-import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, replace
 from typing import Literal
@@ -22,7 +20,8 @@ from form_agent.core.schemas import (
 )
 
 from .extraction import ExtractionResult
-from .normalization import FieldKind, NormalizationResult, normalize_field_value
+from .fields import field_kind
+from .normalization import NormalizationResult, normalize_field_value
 
 type Ask = Callable[[str], Awaitable[str]]
 type Status = Literal["resolved", "skipped", "cancelled", "exhausted", "failed"]
@@ -30,24 +29,6 @@ type Status = Literal["resolved", "skipped", "cancelled", "exhausted", "failed"]
 
 async def terminal_answer(question: str) -> str:
     return await asyncio.to_thread(input, question)
-
-
-def field_kind(field: FormField) -> FieldKind | None:
-    if field.type == "email":
-        return "email"
-    if field.type == "tel":
-        return "phone"
-    if field.type not in {"text", "search"}:
-        return None
-    text = " ".join((field.label, field.name or "", field.id or ""))
-    text = "".join(
-        c for c in unicodedata.normalize("NFD", text.lower()) if not unicodedata.combining(c)
-    )
-    if re.search(r"e[-_ ]?mail", text):
-        return "email"
-    if re.search(r"telefone|phone|celular|whatsapp", text):
-        return "phone"
-    return None
 
 
 def _editable(field: FormField) -> bool:

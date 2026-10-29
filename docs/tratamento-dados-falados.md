@@ -1,7 +1,7 @@
 # Tratamento de dados falados
 
 O fluxo de voz passa a ser áudio → STT → tratamento de dados → FormAgent → navegador.
-A etapa `spoken-data-pt-BR-v3` é local e determinística: não chama outro LLM, não
+A etapa `spoken-data-pt-BR-v4` é local e determinística: não chama outro LLM, não
 consulta `expected_json` e não corrige cidades, nomes pessoais, domínios ou dígitos.
 Por convenção explícita deste experimento, o usuário do e-mail usa ASCII sem acentos.
 A transcrição original permanece intacta no resultado e nos rastros.
@@ -41,6 +41,12 @@ Esta é uma convenção da POC para endereços ASCII, não uma afirmação de qu
 internacionalizados não possam existir. `joão.pedro.gmail.com` continua pendente:
 remover acento não recupera um separador que não foi transcrito. Domínios com
 acentos não são reinterpretados nem convertidos por aproximação.
+
+**E-mail (v4):** respostas de esclarecimento e correções também aceitam uma marca
+final de pontuação de frase (`.`, `!`, `?` ou `;`), como em
+`ana, arroba, example, ponto com.`. A regra registra
+`email_trailing_sentence_punctuation`; os pontos internos e a transcrição original
+são preservados. `ana.example.com` continua pendente: não se inventa o `@`.
 
 **Telefone (v3):** a conversão de números por extenso usa
 [`text2num`](https://github.com/allo-media/text2num) em português, inclusive grupos

@@ -25,7 +25,7 @@ from form_agent.config import BrowserConfig
 from voice_form.interaction import ReviewInput
 
 from .config import WebConfig, asset
-from .extension import ExtensionToolsClient, extension_owner
+from .extension import ExtensionToolsClient, extension_origin, extension_owner
 from .forms import DEMO_FORMS, FormTarget, resolve_target
 from .schemas import ExtensionInput, ExtensionReply, SessionInput, SubmitInput, TextInput
 from .sessions import Session, SessionError, SessionManager
@@ -49,10 +49,19 @@ class RequestLimits:
         )
         if extension_request:
             try:
-                extension_owner(
-                    {key.decode(): value.decode() for key, value in headers.items()},
-                    self.extension_token,
-                )
+                request_headers = {
+                    key.decode("latin-1"): value.decode("latin-1") for key, value in headers.items()
+                }
+                if scope["path"] == "/api/extension/connect" and scope["method"] == "POST":
+                    if urlsplit(f"http://{request_headers.get('host', '')}").hostname not in {
+                        "localhost",
+                        "127.0.0.1",
+                        "::1",
+                    }:
+                        raise ValueError("Conecte pelo endereço local do servidor.")
+                    extension_origin(request_headers)
+                else:
+                    extension_owner(request_headers, self.extension_token)
             except ValueError as exc:
                 await JSONResponse({"detail": str(exc)}, 401)(scope, receive, send)
                 return
@@ -139,7 +148,7 @@ def create_app(
                 403,
             )
         return HTMLResponse(
-            asset("extension-setup.html").read_text().replace("{{PAIRING_CODE}}", extension_token),
+            asset("extension-setup.html").read_text(),
             headers={
                 "Cache-Control": "no-store",
                 "Referrer-Policy": "no-referrer",
@@ -147,6 +156,16 @@ def create_app(
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    @app.post("/api/extension/connect")
+    async def connect_extension() -> dict[str, object]:
+        # Chrome supplies the extension Origin; ordinary pages and other extension
+        # IDs cannot bootstrap. The runtime credential never appears in the UI.
+        return {
+            "token": extension_token,
+            "max_upload_bytes": config.max_upload_bytes,
+            "max_audio_seconds": config.max_audio_seconds,
+        }
 
     @app.post("/api/extension/sessions", status_code=201)
     async def extension_session(request: Request, body: ExtensionInput) -> dict[str, object]:

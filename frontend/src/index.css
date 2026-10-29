@@ -534,6 +534,11 @@ h3 {
   font-size: 12px;
   line-height: 1.6;
 }
+.recorder-error {
+  color: #9b2424;
+  font-size: 13px;
+  line-height: 1.5;
+}
 .recorder-status {
   display: flex;
   align-items: center;
