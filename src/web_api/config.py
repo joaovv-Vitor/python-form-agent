@@ -1,4 +1,4 @@
-"""Fixed-form runtime and bounded resource settings for the homelab."""
+"""Web runtime and bounded resource settings for the homelab."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ class WebConfig:
     event_buffer: int = 128
     cookie_secure: bool = False
     public_origin: str = ""
+    allowed_form_hosts: tuple[str, ...] = ()
     settings: TranscriptionSettings = field(
         default_factory=lambda: TranscriptionSettings(
             model="large-v3",
@@ -74,6 +75,11 @@ class WebConfig:
             operation_seconds=float(os.getenv("WEB_OPERATION_SECONDS", "600")),
             cookie_secure=os.getenv("WEB_COOKIE_SECURE", "false").lower() == "true",
             public_origin=os.getenv("WEB_PUBLIC_ORIGIN", "").rstrip("/"),
+            allowed_form_hosts=tuple(
+                host.strip().lower()
+                for host in os.getenv("WEB_ALLOWED_FORM_HOSTS", "").split(",")
+                if host.strip()
+            ),
             settings=TranscriptionSettings(
                 model=os.getenv("WEB_STT_MODEL", "large-v3"),
                 language="pt",

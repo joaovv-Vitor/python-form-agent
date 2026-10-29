@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Contato — VozForm</title><link rel="stylesheet" href="forms.css"><script src="forms.js" defer></script></head>
+<body><main>
+  <a href="/">← Voltar ao VozForm</a>
+  <p class="eyebrow">Formulário 02 · relacionamento</p>
+  <h1>Fale com a nossa equipe</h1>
+  <p class="intro">Envie uma mensagem e escolha como prefere receber nosso retorno. Os campos com * são obrigatórios.</p>
+  <form data-success-message="Mensagem recebida (simulação).">
+    <div class="field"><label for="contactName">Seu nome</label><input id="contactName" name="contactName" required autocomplete="name"></div>
+    <div class="field"><label for="replyEmail">E-mail para retorno</label><input id="replyEmail" name="replyEmail" type="email" required autocomplete="email"></div>
+    <div class="field"><label for="topic">Assunto do contato</label><select id="topic" name="topic" required><option value="">Selecione um assunto</option><option value="informacao">Pedido de informação</option><option value="elogio">Elogio</option><option value="reclamacao">Reclamação</option></select></div>
+    <div class="field"><label for="messageBody">Sua mensagem</label><textarea id="messageBody" name="messageBody" required></textarea></div>
+    <div class="field"><label for="returnChannel">Preferência de retorno</label><select id="returnChannel" name="returnChannel"><option value="">Sem preferência</option><option value="email">Por e-mail</option><option value="telefone">Por telefone</option></select></div>
+    <div class="field"><label for="contactPhone">Telefone de contato</label><input id="contactPhone" name="contactPhone" type="tel" autocomplete="tel"></div>
+    <button id="sendMessage" type="submit">Enviar mensagem</button><output hidden aria-live="polite"></output>
+  </form>
+  <p class="note">Página de demonstração. O envio é simulado e não transmite a mensagem para uma equipe real.</p>
+</main></body></html>

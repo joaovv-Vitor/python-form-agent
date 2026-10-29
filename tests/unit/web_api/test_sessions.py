@@ -140,13 +140,14 @@ class Speech:
 async def web(tmp_path, batches=None, texts=None, **settings):
     apps = []
 
-    def factory(events):
+    def factory(events, browser):
         model = Model(
             batches
             if batches is not None
             else [[call("fullName", "Ana"), call("city", "Fortaleza")], []]
         )
         tools = Tools()
+        tools.browser_config = browser
         config = ModelConfig("test", "test", "test", "test-key")
         app = Application(config, FormAgent(tools, model, events=events), tools, model)
         apps.append(app)
@@ -179,6 +180,57 @@ async def start(client):
     sid = r.json()["id"]
     await wait(client, sid, "ready")
     return sid
+
+
+async def test_catalogue_pages_and_session_destination(tmp_path):
+    from web_api.forms import DEMO_FORMS
+
+    async with web(tmp_path) as (client, manager, apps, speech):
+        catalog = (await client.get("/api/forms")).json()
+        assert [f["id"] for f in catalog] == ["cadastro", "contato", "inscricao", "suporte"]
+        for item, demo in zip(catalog, DEMO_FORMS, strict=True):
+            page = await client.get(item["url"])
+            assert page.status_code == 200
+            assert page.content == asset(demo.filename).read_bytes()
+        assert (await client.get("/forms/forms.css")).status_code == 200
+        assert (await client.get("/forms/forms.js")).status_code == 200
+        assert (await client.get("/forms/unknown")).status_code == 404
+        response = await client.post("/api/sessions", json={"url": catalog[1]["url"]})
+        assert response.status_code == 201
+        sid = response.json()["id"]
+        data = await wait(client, sid, "ready")
+        assert data["form_name"] == "Contato" and data["is_demo"]
+        assert apps[0].client.browser_config.url == asset("contact.html").as_uri()
+        assert manager.sessions[sid].settings.initial_prompt is None
+        assert manager.sessions[sid].settings.hotwords is None
+
+
+async def test_custom_url_validation_and_external_submission_block(tmp_path):
+    async with web(tmp_path) as (client, manager, apps, speech):
+        for url in ["file:///etc/passwd", "http://127.0.0.1/admin", "javascript:alert(1)"]:
+            response = await client.post("/api/sessions", json={"url": url})
+            assert response.status_code == 422
+        assert not manager.sessions
+        response = await client.post("/api/sessions", json={"url": "https://example.com/form"})
+        assert response.status_code == 201
+        sid = response.json()["id"]
+        data = await wait(client, sid, "ready")
+        assert data["form_url"] == "https://example.com/form"
+        assert not data["is_demo"] and not data["submission_supported"]
+        assert apps[0].client.browser_config.restrict_network
+        await fill(client, sid)
+        await client.post(f"/api/sessions/{sid}/review/complete")
+        data = await wait(client, sid, "review_complete")
+        assert not data["can_submit"]
+        assert (
+            await client.post(
+                f"/api/sessions/{sid}/submit",
+                json={
+                    "confirmation": "ENVIAR",
+                    "revision": data["revision"],
+                },
+            )
+        ).status_code == 409
 
 
 async def fill(client, sid):
@@ -270,6 +322,43 @@ async def test_uploaded_audio_correction_uses_same_session(tmp_path):
         data = await wait(client, sid, "reviewing")
         assert data["corrections"][0]["status"] == "applied"
         assert len(data["transcriptions"]) == 2 and speech.calls == 2 and len(apps) == 1
+
+
+async def test_skipped_clarification_can_be_fixed_and_review_completed(tmp_path):
+    async with web(
+        tmp_path,
+        batches=[
+            [call("fullName", "Ana")],
+            [],
+            [call("email", "ana@example.com", "ana@example.com")],
+        ],
+    ) as (client, manager, apps, speech):
+        sid = await start(client)
+        tools = apps[0].client
+        tools.inspection = replace(
+            tools.inspection,
+            fields=tuple(
+                replace(f, required=True) if f.reference == "email" else f
+                for f in tools.inspection.fields
+            ),
+        )
+        r = await client.post(f"/api/sessions/{sid}/audio", files={"file": ("voice.wav", wav())})
+        assert r.status_code == 202
+        await wait(client, sid, "awaiting_answer")
+        assert (await client.post(f"/api/sessions/{sid}/review/skip")).status_code == 202
+        data = await wait(client, sid, "reviewing")
+        assert not data["can_complete"]
+        assert (await client.post(f"/api/sessions/{sid}/review/complete")).status_code == 409
+        r = await client.post(
+            f"/api/sessions/{sid}/messages",
+            json={"text": "Corrija meu e-mail para ana@example.com"},
+        )
+        assert r.status_code == 202
+        data = await wait(client, sid, "reviewing")
+        assert data["can_complete"] and data["issues"] == []
+        assert (await client.post(f"/api/sessions/{sid}/review/complete")).status_code == 202
+        data = await wait(client, sid, "review_complete")
+        assert data["can_submit"]
 
 
 async def test_owner_origin_capacity_and_input_validation(tmp_path):

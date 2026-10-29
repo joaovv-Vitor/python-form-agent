@@ -139,7 +139,21 @@ def _native_issues(inspection: FormInspection) -> tuple[RunIssue, ...]:
         )
         for field in inspection.fields
         if not field.disabled
-        and (field.valid is False or (field.required and field.value in (None, "", False)))
+        and (
+            field.valid is False
+            or (
+                field.required
+                and field.value in (None, "", False)
+                and not (
+                    field.type == "radio"
+                    and field.name
+                    and any(
+                        other.type == "radio" and other.name == field.name and other.value is True
+                        for other in inspection.fields
+                    )
+                )
+            )
+        )
     )
 
 
@@ -180,7 +194,13 @@ class ReviewSession:
             self.notify("A revisão exige um formulário preenchido com estado verificável.")
             return ReviewResult(form, issues, (), 0.0, False, denied)
         expected = form.final_inspection
-        active = list(issues)
+        # Clarification's native-field warnings are recomputed from each verified
+        # snapshot below. Keeping them here would preserve stale warnings after a fix.
+        active = [
+            issue
+            for issue in issues
+            if not (issue.code == "DATA_PENDING" and issue.stage == "clarification")
+        ]
         written = {field.reference: field for field in form.filled}
         records: list[ReviewRecord] = []
         completed = False

@@ -11,19 +11,23 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from audio_agent.preprocessing import SUPPORTED_AUDIO_FORMATS
+from form_agent.config import BrowserConfig
 from voice_form.interaction import ReviewInput
 
-from .config import WebConfig
-from .schemas import SubmitInput, TextInput
+from .config import WebConfig, asset
+from .extension import ExtensionToolsClient, extension_owner
+from .forms import DEMO_FORMS, FormTarget, resolve_target
+from .schemas import ExtensionInput, ExtensionReply, SessionInput, SubmitInput, TextInput
 from .sessions import Session, SessionError, SessionManager
 from .uploads import validate_audio
 
@@ -31,15 +35,28 @@ COOKIE = "form_session_owner"
 
 
 class RequestLimits:
-    def __init__(self, app: ASGIApp, config: WebConfig) -> None:
+    def __init__(self, app: ASGIApp, config: WebConfig, extension_token: str) -> None:
         self.app, self.config = app, config
+        self.extension_token = extension_token
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not scope["path"].startswith("/api/"):
             await self.app(scope, receive, send)
             return
         headers = dict(scope["headers"])
-        if scope["method"] not in {"GET", "HEAD", "OPTIONS"}:
+        extension_request = b"authorization" in headers or scope["path"].startswith(
+            "/api/extension/"
+        )
+        if extension_request:
+            try:
+                extension_owner(
+                    {key.decode(): value.decode() for key, value in headers.items()},
+                    self.extension_token,
+                )
+            except ValueError as exc:
+                await JSONResponse({"detail": str(exc)}, 401)(scope, receive, send)
+                return
+        elif scope["method"] not in {"GET", "HEAD", "OPTIONS"}:
             origin = headers.get(b"origin", b"").decode()
             allowed = (
                 self.config.public_origin
@@ -98,14 +115,79 @@ def create_app(
 
     app = FastAPI(title="Formulários por áudio", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.manager = manager
-    app.add_middleware(RequestLimits, config=config)
+    extension_token = secrets.token_urlsafe(32)
+    app.state.extension_token = extension_token
+    app.add_middleware(RequestLimits, config=config, extension_token=extension_token)
 
     @app.exception_handler(SessionError)
     async def session_error(request: Request, exc: SessionError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
 
     def owned(request: Request, session_id: str) -> Session:
-        return manager.get(session_id, request.cookies.get(COOKIE, ""))
+        owner = (
+            extension_owner(request.headers, extension_token)
+            if request.headers.get("authorization")
+            else request.cookies.get(COOKIE, "")
+        )
+        return manager.get(session_id, owner)
+
+    @app.get("/extension/setup", include_in_schema=False)
+    async def extension_setup(request: Request) -> HTMLResponse:
+        if request.url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise SessionError(
+                "Abra esta página pelo endereço local do servidor: http://127.0.0.1:8000/extension/setup",
+                403,
+            )
+        return HTMLResponse(
+            asset("extension-setup.html").read_text().replace("{{PAIRING_CODE}}", extension_token),
+            headers={
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+                "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.post("/api/extension/sessions", status_code=201)
+    async def extension_session(request: Request, body: ExtensionInput) -> dict[str, object]:
+        parsed = urlsplit(body.url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or any(ord(char) < 32 for char in body.url)
+        ):
+            raise SessionError("Selecione uma página HTTP ou HTTPS com um formulário.", 422)
+        owner = extension_owner(request.headers, extension_token)
+        target = FormTarget(
+            body.url, f"Formulário de {parsed.hostname}", BrowserConfig(body.url), False
+        )
+        bridge = ExtensionToolsClient(body.url, body.document_id)
+        return manager.create(owner, target, bridge=bridge).public()
+
+    def extension_session_owned(request: Request, session_id: str) -> Session:
+        session = owned(request, session_id)
+        if not session.bridge:
+            raise SessionError("Sessão da extensão não encontrada.", 404)
+        return session
+
+    @app.get("/api/extension/sessions/{session_id}/poll")
+    async def extension_poll(request: Request, session_id: str) -> dict[str, object]:
+        session = extension_session_owned(request, session_id)
+        # Polling an unattended panel must not prevent the idle-session timeout.
+        return {
+            "session": session.public(),
+            "command": session.bridge.pending if session.bridge else None,
+        }
+
+    @app.post("/api/extension/sessions/{session_id}/results")
+    async def extension_result(
+        request: Request, session_id: str, body: ExtensionReply
+    ) -> dict[str, bool]:
+        session = extension_session_owned(request, session_id)
+        assert session.bridge is not None
+        return {"accepted": session.bridge.resolve(body.command_id, body.result)}
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
@@ -115,10 +197,38 @@ def create_app(
             "max_audio_seconds": config.max_audio_seconds,
         }
 
+    @app.get("/api/forms")
+    async def forms(request: Request) -> list[dict[str, str]]:
+        origin = config.public_origin or str(request.base_url)
+        return [form.public(origin) for form in DEMO_FORMS]
+
+    @app.get("/forms/forms.css", include_in_schema=False)
+    async def form_styles() -> FileResponse:
+        return FileResponse(asset("forms.css"), media_type="text/css")
+
+    @app.get("/forms/forms.js", include_in_schema=False)
+    async def form_script() -> FileResponse:
+        return FileResponse(asset("forms.js"), media_type="text/javascript")
+
+    @app.get("/forms/{form_id}", include_in_schema=False)
+    async def demo_form(form_id: str) -> FileResponse:
+        selected = next((form for form in DEMO_FORMS if form.id == form_id), None)
+        if selected is None:
+            raise SessionError("Formulário não encontrado.", 404)
+        return FileResponse(asset(selected.filename), media_type="text/html")
+
     @app.post("/api/sessions", status_code=201)
-    async def create_session(request: Request) -> JSONResponse:
+    async def create_session(request: Request, body: SessionInput | None = None) -> JSONResponse:
         owner = request.cookies.get(COOKIE) or secrets.token_urlsafe(32)
-        session = manager.create(owner)
+        try:
+            target = resolve_target(
+                body.url if body else "",
+                origin=config.public_origin or str(request.base_url),
+                allowed_hosts=config.allowed_form_hosts,
+            )
+        except ValueError as exc:
+            raise SessionError(str(exc), 422) from exc
+        session = manager.create(owner, target)
         response = JSONResponse(session.public(), status_code=201)
         response.set_cookie(
             COOKIE,
@@ -170,7 +280,7 @@ def create_app(
             raise SessionError("Aguarde a revisão para enviar um áudio de correção.")
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in SUPPORTED_AUDIO_FORMATS:
-            raise SessionError("Use um arquivo WAV, MP3, MP4, M4A ou FLAC.", 415)
+            raise SessionError("Use um arquivo WAV, MP3, MP4, M4A, FLAC, WebM ou OGG.", 415)
         old_state = session.state
         session.waiting = False
         session.last_active = session.operation_started = time.monotonic()

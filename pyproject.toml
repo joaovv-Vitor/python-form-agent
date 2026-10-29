@@ -44,7 +44,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "form_agent.prompts" = ["*.txt"]
-"web_api" = ["assets/*.html", "assets/*.json"]
+"web_api" = ["assets/*.html", "assets/*.json", "assets/*.css", "assets/*.js"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

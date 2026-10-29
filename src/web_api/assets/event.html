@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Inscrição em evento — VozForm</title><link rel="stylesheet" href="forms.css"><script src="forms.js" defer></script></head>
+<body style="--accent:#7652ba"><main>
+  <a href="/">← Voltar ao VozForm</a>
+  <p class="eyebrow">Formulário 03 · participação</p>
+  <h1>Inscrição em evento</h1>
+  <p class="intro">Escolha o evento e a modalidade de participação. Os campos com * são obrigatórios.</p>
+  <form data-success-message="Inscrição registrada (simulação).">
+    <div class="field"><label for="attendee">Nome do participante</label><input id="attendee" name="attendee" required autocomplete="name"></div>
+    <div class="field"><label for="eventChoice">Evento desejado</label><select id="eventChoice" name="eventChoice" required><option value="">Escolha um evento</option><option value="oficina-ia">Oficina de inteligência artificial</option><option value="seminario-dados">Seminário de ciência de dados</option><option value="encontro-pesquisa">Encontro de pesquisa</option></select></div>
+    <div class="field"><label for="eventDate">Data de participação</label><input id="eventDate" name="eventDate" type="date"></div>
+    <div class="field"><label for="attendanceMode">Modalidade de participação</label><select id="attendanceMode" name="attendanceMode" required><option value="">Selecione a modalidade</option><option value="presencial">Presencial</option><option value="online">Online</option></select></div>
+    <div class="field"><label for="accessibilityNotes">Necessidades de acessibilidade</label><textarea id="accessibilityNotes" name="accessibilityNotes"></textarea></div>
+    <div class="check"><input id="receiveUpdates" name="receiveUpdates" type="checkbox"><label for="receiveUpdates">Quero receber novidades sobre os eventos</label></div>
+    <button id="registerEvent" type="submit">Confirmar inscrição</button><output hidden aria-live="polite"></output>
+  </form>
+  <p class="note">Página de demonstração. A inscrição é simulada e não reserva vagas em eventos reais.</p>
+</main></body></html>

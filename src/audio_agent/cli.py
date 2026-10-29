@@ -26,7 +26,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Transcreve um arquivo de áudio local usando faster-whisper."
     )
-    parser.add_argument("audio_file", type=Path, help="Caminho para WAV, MP3, MP4, M4A ou FLAC.")
+    parser.add_argument(
+        "audio_file", type=Path, help="Caminho para WAV, MP3, MP4, M4A, FLAC, WebM ou OGG."
+    )
     parser.add_argument("--json", action="store_true", help="Imprime o resultado em JSON.")
     add_transcription_arguments(parser)
     parser.add_argument("--verbose", action="store_true")

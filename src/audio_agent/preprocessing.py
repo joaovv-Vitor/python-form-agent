@@ -7,7 +7,7 @@ from pathlib import Path
 from .exceptions import AudioFileNotFoundError, EmptyAudioFileError, UnsupportedAudioFormatError
 from .models import PreparedAudio
 
-SUPPORTED_AUDIO_FORMATS = frozenset({".wav", ".mp3", ".mp4", ".m4a", ".flac"})
+SUPPORTED_AUDIO_FORMATS = frozenset({".wav", ".mp3", ".mp4", ".m4a", ".flac", ".webm", ".ogg"})
 
 
 class AudioPreprocessor:

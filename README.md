@@ -5,9 +5,16 @@ formulários web com um agente baseado em LLM. Mantém interfaces independentes 
 STT e ferramentas, MCP local por stdio e Playwright encapsulado. O áudio pode ser usado
 isoladamente ou composto com o Form Agent.
 
-A [aplicação web V1](docs/web-v1.md) usa o formulário padrão, recebe arquivos de
-áudio e mostra o preenchimento, as mensagens e a revisão na mesma sessão. Inclui
-confirmação de envio simulado e configuração para implantação no homelab.
+A [aplicação web](docs/web-v1.md) permite selecionar Cadastro, Contato, Inscrição em evento
+ou Suporte técnico, ou informar a URL de um formulário HTML simples. O Cadastro original
+continua sendo o primeiro e o padrão. É possível gravar pelo microfone ou enviar arquivos de
+áudio e acompanhar o preenchimento e a revisão na mesma sessão. Os quatro exemplos incluem
+confirmação de envio simulado; URLs externas permitem preenchimento e revisão.
+
+A [extensão para Chrome](docs/chrome-extension.md) é uma segunda interface: grava
+ou recebe áudio e preenche diretamente a aba escolhida, com correções e revisão.
+Ela usa o mesmo servidor Python local e preserva a aplicação web. Compile com
+`npm run build:extension` em `frontend/` e carregue `extension/dist` no Chrome.
 
 Com as dependências e o `.env` configurados:
 
@@ -185,7 +192,7 @@ Ambos os comandos de áudio aceitam `--model`, `--language`, `--device cpu|cuda`
 `--compute-type`, `--beam-size`, `--temperature`, `--vad-filter`, `--email-hints`,
 `--initial-prompt` e `--hotwords`. Padrões: small, idioma
 por detecção, CPU/int8, beam size 5, temperatura 0, VAD desativado. O adaptador usa PyAV
-para decodificar WAV/MP3/MP4/M4A/FLAC; a preparação não aplica limpeza ou correção automática.
+para decodificar WAV/MP3/MP4/M4A/FLAC/WebM/OGG; a preparação não aplica limpeza ou correção automática.
 
 ## Avaliação
 

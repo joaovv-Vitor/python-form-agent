@@ -107,6 +107,9 @@ def metadata(
             "timeout_ms": browser.timeout_ms,
             "executable_path": browser.executable_path,
             "submission_success_selector": browser.submission_success_selector,
+            "form_selector": browser.form_selector,
+            "restrict_network": browser.restrict_network,
+            "allowed_hosts": list(browser.allowed_hosts),
         }
     return result
 

@@ -18,6 +18,10 @@ class ToolClient(Protocol):
     async def close(self) -> None: ...
 
 
+class SubmissionClient(ToolClient, Protocol):
+    async def set_submission_authorized(self, authorized: bool) -> None: ...
+
+
 class ModelSession(Protocol):
     async def next(self, completed: Sequence[ToolCompletion]) -> list[ToolCall]: ...
 

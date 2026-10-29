@@ -16,6 +16,7 @@ from .config import (
 )
 from .core.agent import FormAgent
 from .core.events import EventSink, discard_event
+from .core.interfaces import SubmissionClient
 
 
 @dataclass(slots=True)
@@ -24,7 +25,7 @@ class Application:
 
     config: ModelConfig
     agent: FormAgent
-    client: BrowserToolsClient
+    client: SubmissionClient
     model: OpenAICompatibleModel
 
     async def close(self) -> None:

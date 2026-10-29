@@ -10,7 +10,7 @@ from audio_agent.exceptions import (
 from audio_agent.preprocessing import AudioPreprocessor
 
 
-@pytest.mark.parametrize("extension", ["WAV", "mp3", "mp4", "m4a", "flac"])
+@pytest.mark.parametrize("extension", ["WAV", "mp3", "mp4", "m4a", "flac", "webm", "ogg"])
 def test_prepare_accepts_supported_audio_file(tmp_path: Path, extension: str):
     audio_file = tmp_path / f"sample.{extension}"
     audio_file.write_bytes(b"audio")
@@ -29,7 +29,7 @@ def test_prepare_rejects_missing_file(tmp_path: Path):
 
 
 def test_prepare_rejects_unsupported_extension(tmp_path: Path):
-    audio_file = tmp_path / "sample.ogg"
+    audio_file = tmp_path / "sample.txt"
     audio_file.write_bytes(b"audio")
 
     with pytest.raises(UnsupportedAudioFormatError, match="Formato não suportado"):

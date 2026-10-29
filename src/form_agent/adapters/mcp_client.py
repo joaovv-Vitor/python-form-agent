@@ -85,6 +85,9 @@ class BrowserToolsClient:
                     "BROWSER_TIMEOUT_MS": str(config.timeout_ms),
                     "BROWSER_EXECUTABLE_PATH": config.executable_path or "",
                     "SUBMISSION_SUCCESS_SELECTOR": config.submission_success_selector,
+                    "FORM_SELECTOR": config.form_selector or "",
+                    "BROWSER_RESTRICT_NETWORK": str(config.restrict_network).lower(),
+                    "BROWSER_ALLOWED_HOSTS": ",".join(config.allowed_hosts),
                 }
             )
         return environment

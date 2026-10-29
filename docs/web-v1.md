@@ -1,9 +1,15 @@
 # Aplicação web V1
 
-A V1 usa o formulário padrão e arquivos de áudio. Mostra os valores observados
+A [extensão Chrome](chrome-extension.md) também está disponível e usa o mesmo servidor.
+Esta aplicação web continua independente, com todos os fluxos descritos abaixo.
+
+A aplicação permite selecionar um dos quatro exemplos ou informar a URL de um formulário
+HTML simples. O Cadastro original continua sendo o primeiro e o padrão. Recebe áudio
+gravado pelo microfone ou enviado em arquivo e mostra os valores observados
 no navegador automatizado, acompanha o processamento e permite perguntas e
-correções por texto ou outro arquivo na mesma sessão. O envio é a simulação do
-formulário de exemplo, com confirmação humana separada.
+correções por texto, microfone ou outro arquivo na mesma sessão. O envio é a simulação do
+formulário de exemplo, com confirmação humana separada. URLs externas permitem
+preenchimento e revisão; o envio automático fica habilitado apenas nos exemplos integrados.
 
 ## Executar localmente
 
@@ -33,26 +39,67 @@ Inicie o serviço na raiz do projeto:
 HF_HUB_CACHE=reports/model-cache form-web-py
 ```
 
-Abra [http://localhost:8000](http://localhost:8000). O serviço prepara a sessão e
-os sete campos reais antes de aceitar o áudio. Selecione o arquivo, escute-o se
-necessário e pressione **Preencher com áudio**. Na revisão, use o campo de texto
-ou a seção **Corrigir campo por áudio**, que fica aberta: selecione uma nova
-gravação e clique em **Enviar áudio de correção**. Diga o campo e o novo valor,
+Abra [http://localhost:8000](http://localhost:8000). O serviço abre inicialmente o Cadastro
+original. Em **Formulário de destino**, selecione outro exemplo ou informe uma URL e
+pressione **Abrir formulário**. A troca encerra a sessão anterior e inspeciona o novo destino.
+Durante o processamento ou a revisão, encerre a sessão antes de trocar de formulário.
+O sistema prepara os campos reais antes de aceitar o áudio. Clique em **Usar microfone**, autorize
+o acesso no navegador e depois clique em **Parar gravação**. Você pode cancelar a
+gravação sem enviá-la. A opção de selecionar um arquivo continua disponível abaixo.
+Escute a prévia e pressione **Preencher com áudio** quando estiver pronto; a gravação
+não é enviada automaticamente. Na revisão, use o campo de texto
+ou a seção **Corrigir campo por áudio**, que fica aberta: grave pelo microfone ou
+selecione um arquivo e clique em **Enviar áudio de correção**. Diga o campo e o novo valor,
 por exemplo, “Corrija minha cidade para Quixadá”; os demais campos são mantidos.
 Para encerrar sem enviar, use
 **Encerrar sessão**.
 
+O microfone requer HTTPS ou localhost e permissão do navegador. Se o acesso for
+negado ou não houver um dispositivo compatível, o envio de arquivos permanece
+disponível. O microfone é liberado ao parar, cancelar ou sair da sessão. A gravação
+para automaticamente perto do limite de duração e respeita o limite de tamanho;
+o backend também valida os arquivos antes da transcrição. A interface aceita
+WAV, MP3, MP4, M4A, FLAC, WebM e OGG; o formato da gravação é escolhido conforme
+o suporte do navegador.
+
 O primeiro uso pode baixar/carregar o modelo. O padrão reproduz a configuração
-do caso perfeito: large-v3, português, CPU/int8, orientação de e-mail e regras
-locais. Para experimentar outro modelo, defina `WEB_STT_MODEL` no servidor e
+do caso perfeito no Cadastro: large-v3, português, CPU/int8, orientação de e-mail e regras
+locais. Nos outros destinos, as dicas de transcrição são geradas a partir dos campos e opções
+inspecionados. Para experimentar outro modelo, defina `WEB_STT_MODEL` no servidor e
 registre a nova condição; essa mudança não é controle disponível ao usuário.
 
 Para desenvolvimento com atualização automática da interface, mantenha a API
 na porta 8000 e execute `npm run dev` em `frontend/`. Acesse o endereço informado
-pelo Vite; `/api` é encaminhado para o backend. O servidor de desenvolvimento
+pelo Vite; `/api` e `/forms` são encaminhados para o backend. O servidor de desenvolvimento
 fica restrito ao endereço local e não é a forma de publicação em produção.
 
 ## Sessões, eventos e dados
+
+O catálogo mantém esta ordem e cada página pode ser aberta separadamente:
+
+| Exemplo | URL local | Campos característicos |
+|---|---|---|
+| Cadastro original | `/forms/cadastro` | Os sete campos do formulário anterior, sem alterar seu HTML |
+| Contato | `/forms/contato` | Assunto, mensagem e preferência de retorno |
+| Inscrição em evento | `/forms/inscricao` | Evento, modalidade, data e acessibilidade |
+| Suporte técnico | `/forms/suporte` | Produto, categoria, prioridade e descrição |
+
+O preenchimento usa o inventário descoberto em cada página; o catálogo não fornece um mapa
+de campos ao modelo. Os testes em `tests/integration/test_form_catalog.py` incluem valores
+esperados diferentes para cada exemplo e verificam preenchimento, validade e envio simulado.
+
+URLs externas devem usar HTTP/HTTPS, sem credenciais na URL, login ou redirecionamentos,
+e apresentar um único formulário visível na página principal, com referências de campos únicas. Senhas, anexos, CAPTCHA,
+componentes personalizados e formulários com várias etapas ficam fora desta versão.
+Texto, textarea, listas nativas, datas, números, checkbox e radio podem ser inspecionados;
+as limitações da revisão interativa continuam descritas no documento correspondente.
+
+Destinos locais e privados adicionais precisam ser habilitados pelo operador em
+`WEB_ALLOWED_FORM_HOSTS`, com nomes separados por vírgulas, e reinício do servidor.
+Os exemplos integrados são resolvidos para os recursos empacotados e não dependem dessa
+permissão. O navegador verifica destinos HTTP, bloqueia redirecionamentos, service workers
+e WebSockets nas páginas externas. Essas verificações não substituem isolamento de rede:
+mantenha o acesso controlado do piloto e use páginas autorizadas para o experimento.
 
 - Uma sessão ativa por padrão; cada sessão tem cliente MCP, navegador, contexto
   de revisão e proprietário próprios. O cookie de propriedade é HTTP-only.
@@ -91,13 +138,14 @@ fora da V1. O aceite dos termos pode ser declarado explicitamente no áudio inic
 | `WEB_MAX_UPLOAD_BYTES` | `26214400` | Limite por arquivo |
 | `WEB_MAX_AUDIO_SECONDS` | `120` | Duração máxima decodificada |
 | `WEB_STT_MODEL` | `large-v3` | Modelo fixado pelo operador |
+| `WEB_ALLOWED_FORM_HOSTS` | vazio | Hosts locais adicionais autorizados para o experimento |
 | `WEB_COOKIE_SECURE` | `false` | Ativar em publicação HTTPS |
 | `WEB_PUBLIC_ORIGIN` | origem da requisição | Origem HTTPS pública permitida para comandos |
 
 `MODEL_PROFILE`, `LLM_*` e as chaves dos perfis continuam sendo as configurações
 existentes do modelo de formulário. O perfil padrão é empacotado; para fornecer
-outro arquivo, use `MODEL_PROFILES_FILE`. O destino web é sempre o formulário
-empacotado, independentemente de `FORM_URL`; Chromium roda headless na web.
+outro arquivo, use `MODEL_PROFILES_FILE`. O destino web pertence à sessão e é independente
+de `FORM_URL`; Chromium roda headless na web.
 
 O frontend usa HTTP para comandos/upload e SSE para acompanhamento. A API inclui
 `GET /api/session` para recuperar a sessão ativa do proprietário; as demais

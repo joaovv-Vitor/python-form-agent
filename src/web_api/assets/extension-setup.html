@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Conectar extensão · VozForm</title>
+    <link rel="stylesheet" href="/forms/forms.css">
+  </head>
+  <body>
+    <main>
+      <h1>VozForm no Chrome</h1>
+      <p>A aplicação web continua disponível. A extensão usa este mesmo servidor para preencher a aba que você escolher.</p>
+      <ol>
+        <li>Compile a extensão com <code>npm run build:extension</code> na pasta <code>frontend</code>.</li>
+        <li>Abra <code>chrome://extensions</code>, ative o Modo do desenvolvedor e escolha Carregar sem compactação.</li>
+        <li>Selecione a pasta <code>extension/dist</code> deste projeto.</li>
+        <li>Abra o site com o formulário e clique no ícone VozForm para abrir o painel lateral.</li>
+        <li>Cole o código abaixo no painel e escolha Usar formulário desta aba.</li>
+      </ol>
+      <div class="field">
+        <label for="pairing">Código de conexão</label>
+        <input id="pairing" type="text" value="{{PAIRING_CODE}}" readonly autocomplete="off" spellcheck="false">
+      </div>
+      <p>O código muda quando o servidor reinicia. Use-o apenas na extensão deste projeto. Mantenha o servidor ligado durante o uso.</p>
+      <p>Se o servidor estiver ocupado, encerre a sessão web anterior. O envio é feito por você no site, após conferir os valores.</p>
+      <a href="/">Voltar para a aplicação web</a>
+    </main>
+  </body>
+</html>

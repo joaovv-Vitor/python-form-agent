@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { acceptSnapshot, json, labels, request, type Field, type Session } from './services/api'
+import { AudioRecorder } from './components/AudioRecorder'
+import {
+  ApiError,
+  acceptSnapshot,
+  json,
+  labels,
+  request,
+  type DemoForm,
+  type Field,
+  type Session,
+} from './services/api'
 
 const terminal = new Set(['closed', 'expired'])
 const active = new Set([
@@ -34,19 +44,22 @@ function FormField({
   field,
   busy,
   highlighted,
+  showValidation,
 }: {
   field: Field
   busy: boolean
   highlighted: boolean
+  showValidation: boolean
 }) {
   const id = `field-${field.reference}`
+  const invalid = showValidation && field.valid === false
   return (
     <div
-      className={`field ${field.type === 'checkbox' ? 'checkbox-field' : ''} ${field.valid === false ? 'invalid' : ''} ${highlighted ? 'highlighted' : ''}`}
+      className={`field ${['checkbox', 'radio'].includes(field.type) ? 'checkbox-field' : ''} ${invalid ? 'invalid' : ''} ${highlighted ? 'highlighted' : ''}`}
     >
-      {field.type === 'checkbox' ? (
+      {['checkbox', 'radio'].includes(field.type) ? (
         <>
-          <input id={id} type="checkbox" checked={Boolean(field.value)} disabled />
+          <input id={id} type={field.type} checked={Boolean(field.value)} disabled />
           <label htmlFor={id}>{field.label}</label>
         </>
       ) : (
@@ -63,11 +76,31 @@ function FormField({
                 </option>
               ))}
             </select>
+          ) : field.type === 'textarea' ? (
+            <textarea
+              id={id}
+              readOnly
+              value={String(field.value ?? '')}
+              rows={4}
+              placeholder="Aguardando informação"
+            />
           ) : (
             <input
               id={id}
               type={
-                ['email', 'tel', 'date', 'number', 'url'].includes(field.type) ? field.type : 'text'
+                [
+                  'email',
+                  'tel',
+                  'date',
+                  'number',
+                  'url',
+                  'time',
+                  'datetime-local',
+                  'month',
+                  'week',
+                ].includes(field.type)
+                  ? field.type
+                  : 'text'
               }
               readOnly
               value={String(field.value ?? '')}
@@ -76,7 +109,7 @@ function FormField({
           )}
         </>
       )}
-      {field.valid === false && (
+      {invalid && (
         <small className="field-error">{field.validation_message || 'Confira este valor.'}</small>
       )}
       {busy && field.value && field.type !== 'checkbox' && (
@@ -90,6 +123,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [error, setError] = useState('')
   const [working, setWorking] = useState(false)
+  const [recording, setRecording] = useState(false)
   const [connection, setConnection] = useState('Conectando')
   const [file, setFile] = useState<File | null>(null)
   const [audioUrl, setAudioUrl] = useState('')
@@ -97,9 +131,14 @@ export default function App() {
   const [confirm, setConfirm] = useState(false)
   const [maxBytes, setMaxBytes] = useState(25 * 1024 * 1024)
   const [maxSeconds, setMaxSeconds] = useState(120)
+  const [forms, setForms] = useState<DemoForm[]>([])
+  const [targetUrl, setTargetUrl] = useState(
+    new URL('/forms/cadastro', window.location.origin).href,
+  )
   const log = useRef<HTMLDivElement>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const mounted = useRef(true)
+  const sessionEnded = terminal.has(session?.state ?? '')
 
   function update(value: Session) {
     setSession((current) => acceptSnapshot(current, value))
@@ -115,7 +154,10 @@ export default function App() {
       } catch {
         current = await request<Session>('/sessions', { method: 'POST' })
       }
-      if (mounted.current) update(current)
+      if (mounted.current) {
+        update(current)
+        setTargetUrl(new URL(current.form_url, window.location.origin).href)
+      }
     } catch (e) {
       if (mounted.current) setError((e as Error).message)
     } finally {
@@ -126,6 +168,9 @@ export default function App() {
   useEffect(() => {
     mounted.current = true
     void connect()
+    void request<DemoForm[]>('/forms')
+      .then(setForms)
+      .catch(() => {})
     void request<{ max_upload_bytes: number; max_audio_seconds: number }>('/health')
       .then((v) => {
         setMaxBytes(v.max_upload_bytes)
@@ -138,22 +183,89 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!session || terminal.has(session.state)) return
-    const source = new EventSource(`/api/sessions/${session.id}/events`)
-    source.onopen = () => setConnection('Conectado')
-    source.addEventListener('session', (event) => {
-      try {
-        const value = JSON.parse(event.data).state as Session
-        update(value)
-        setConnection('Conectado')
-        if (terminal.has(value.state)) source.close()
-      } catch {
-        setError('Não foi possível atualizar o estado da sessão.')
+    if (!session || sessionEnded) return
+    const sessionId = session.id
+    let source: EventSource | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let disposed = false
+    const controller = new AbortController()
+
+    function stop() {
+      disposed = true
+      source?.close()
+      clearTimeout(timer)
+      controller.abort()
+    }
+
+    function receive(value: Session) {
+      if (disposed) return
+      update(value)
+      if (terminal.has(value.state)) {
+        stop()
+        setConfirm(false)
       }
-    })
-    source.onerror = () => setConnection('Reconectando…')
-    return () => source.close()
-  }, [session?.id])
+    }
+
+    async function recover() {
+      try {
+        const current = await request<Session>(`/sessions/${sessionId}`, {
+          signal: controller.signal,
+        })
+        receive(current)
+        if (!disposed) timer = setTimeout(openStream, 3000)
+      } catch (e) {
+        if (disposed) return
+        if (e instanceof ApiError && e.status === 404) {
+          stop()
+          setConfirm(false)
+          setSession((current) =>
+            current?.id === sessionId
+              ? {
+                  ...current,
+                  state: 'expired',
+                  question: '',
+                  can_message: false,
+                  can_correct_audio: false,
+                  can_complete: false,
+                  can_submit: false,
+                }
+              : current,
+          )
+          setError('Sua sessão expirou ou foi encerrada. Inicie uma nova sessão para continuar.')
+        } else {
+          timer = setTimeout(() => void recover(), 3000)
+        }
+      }
+    }
+
+    function openStream() {
+      if (disposed) return
+      const stream = new EventSource(`/api/sessions/${sessionId}/events`)
+      source = stream
+      stream.onopen = () => {
+        if (!disposed) setConnection('Conectado')
+      }
+      stream.addEventListener('session', (event) => {
+        if (disposed) return
+        try {
+          receive(JSON.parse(event.data).state as Session)
+          setConnection('Conectado')
+        } catch {
+          setError('Não foi possível atualizar o estado da sessão.')
+        }
+      })
+      stream.onerror = () => {
+        if (disposed || source !== stream) return
+        stream.onerror = null
+        stream.close()
+        setConnection('Reconectando…')
+        void recover()
+      }
+    }
+
+    openStream()
+    return stop
+  }, [session?.id, sessionEnded])
 
   useEffect(() => {
     if (!file) {
@@ -174,7 +286,7 @@ export default function App() {
   }, [confirm])
 
   async function action(path: string, options: RequestInit = { method: 'POST' }) {
-    if (!session || working) return
+    if (!session || working || recording) return
     setWorking(true)
     setError('')
     try {
@@ -211,10 +323,50 @@ export default function App() {
     if (result) setText('')
   }
 
+  async function loadTarget(event: FormEvent) {
+    event.preventDefault()
+    if (working || recording) return
+    setWorking(true)
+    setError('')
+    try {
+      if (session && !terminal.has(session.state)) {
+        update(await request<Session>(`/sessions/${session.id}`, { method: 'DELETE' }))
+        let closed = false
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const current = await request<Session>(`/sessions/${session.id}`)
+          if (!mounted.current) return
+          update(current)
+          if (terminal.has(current.state)) {
+            closed = true
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+        if (!closed)
+          throw new Error('A sessão anterior ainda está encerrando. Aguarde e tente novamente.')
+      }
+      const next = await request<Session>('/sessions', json({ url: targetUrl.trim() }))
+      if (!mounted.current) return
+      setFile(null)
+      setText('')
+      setConfirm(false)
+      update(next)
+      setTargetUrl(new URL(next.form_url, window.location.origin).href)
+    } catch (e) {
+      if (mounted.current) setError((e as Error).message)
+    } finally {
+      if (mounted.current) setWorking(false)
+    }
+  }
+
   const state = session?.state ?? 'preparing'
   const finished = terminal.has(state)
   const busy = active.has(state)
+  const showValidation = session?.phase === 'clarification' || session?.phase === 'review'
   const canUpload = session?.state === 'ready' || session?.can_correct_audio
+  const canChooseTarget =
+    !working && !recording && (!session || ['ready', 'closed', 'expired', 'error'].includes(state))
+  const selectedForm = forms.find((form) => form.url === targetUrl)?.id ?? 'custom'
   const issues = session?.issues.filter((i) => i.code !== 'SUBMISSION_BLOCKED') ?? []
 
   return (
@@ -227,11 +379,14 @@ export default function App() {
           VozForm
         </a>
         <div className="header-actions">
-          <span className="version-tag">Primeira versão · formulário padrão</span>
+          <a href="/extension/setup" className="version-tag">
+            Extensão Chrome
+          </a>
+          <span className="version-tag">Formulários por voz</span>
           {session && !finished && (
             <button
               className="button secondary"
-              disabled={working || state === 'closing'}
+              disabled={working || recording || state === 'closing'}
               onClick={() => void action('', { method: 'DELETE' })}
             >
               Encerrar sessão
@@ -244,7 +399,7 @@ export default function App() {
           <div>
             <span className="eyebrow">PREENCHIMENTO ASSISTIDO POR ÁUDIO</span>
             <h1>Seus dados, com a sua voz.</h1>
-            <p>Consulte os campos, envie uma gravação e acompanhe o preenchimento.</p>
+            <p>Consulte os campos, grave ou envie um áudio e acompanhe o preenchimento.</p>
           </div>
           <span className={`status ${busy ? 'running' : ''}`} role="status">
             <i />
@@ -265,21 +420,78 @@ export default function App() {
           </div>
         )}
 
+        <section className="target-card" aria-label="Escolher formulário de destino">
+          <div className="target-heading">
+            <div>
+              <span className="eyebrow">FORMULÁRIO DE DESTINO</span>
+              <p>Escolha um exemplo ou informe uma URL.</p>
+            </div>
+            {session?.form_url && (
+              <a href={session.form_url} target="_blank" rel="noreferrer">
+                Ver formulário original ↗
+              </a>
+            )}
+          </div>
+          <form className="target-controls" onSubmit={loadTarget}>
+            <div>
+              <label htmlFor="demo-form">Formulários de demonstração</label>
+              <select
+                id="demo-form"
+                value={selectedForm}
+                disabled={!canChooseTarget}
+                onChange={(event) => {
+                  const form = forms.find((item) => item.id === event.target.value)
+                  setTargetUrl(form?.url ?? '')
+                }}
+              >
+                {forms.map((form, index) => (
+                  <option key={form.id} value={form.id}>
+                    {index + 1}. {form.name}
+                    {index === 0 ? ' — formulário original' : ''}
+                  </option>
+                ))}
+                <option value="custom">Outro formulário por URL</option>
+              </select>
+            </div>
+            <div className="target-url">
+              <label htmlFor="form-url">URL do formulário</label>
+              <input
+                id="form-url"
+                type="url"
+                required
+                maxLength={2048}
+                value={targetUrl}
+                disabled={!canChooseTarget}
+                placeholder="https://exemplo.com/formulario"
+                onChange={(event) => setTargetUrl(event.target.value)}
+              />
+            </div>
+            <button className="button primary" disabled={!canChooseTarget || !targetUrl.trim()}>
+              Abrir formulário
+            </button>
+          </form>
+          <p className="target-help">
+            {canChooseTarget
+              ? 'O Cadastro é o primeiro exemplo e mantém o formulário que você já utiliza.'
+              : 'Encerre a sessão atual para escolher outro formulário.'}
+          </p>
+        </section>
+
         <div className="workspace">
           <section className="browser" aria-label="Visualização sincronizada do formulário">
             <div className="browser-bar">
               <span className="dots" aria-hidden="true">
                 ● ● ●
               </span>
-              <span>Cadastro · formulário padrão</span>
+              <span>{session?.form_name ?? 'Formulário'}</span>
               <small>{session && !finished ? connection : 'Sessão encerrada'}</small>
             </div>
             <div className="form-page">
               <div className="form-card">
                 <div className="form-title">
-                  <span className="form-logo">C</span>
+                  <span className="form-logo">{session?.form_name.charAt(0) ?? 'F'}</span>
                   <div>
-                    <h2>Cadastro</h2>
+                    <h2>{session?.form_name ?? 'Formulário'}</h2>
                     <p>Confira os campos e acompanhe suas informações.</p>
                   </div>
                 </div>
@@ -291,6 +503,7 @@ export default function App() {
                         field={field}
                         busy={busy}
                         highlighted={session.active_field === field.reference}
+                        showValidation={showValidation}
                       />
                     ))}
                   </div>
@@ -305,7 +518,9 @@ export default function App() {
                 <div className="form-footnote">
                   {state === 'sent'
                     ? 'Envio simulado confirmado pelo formulário.'
-                    : 'Você poderá revisar e corrigir seus dados antes de confirmar o envio.'}
+                    : session?.is_demo
+                      ? 'Você poderá revisar e corrigir seus dados antes de confirmar o envio simulado.'
+                      : 'Confira os campos encontrados na página e revise os valores preenchidos.'}
                 </div>
               </div>
             </div>
@@ -357,8 +572,8 @@ export default function App() {
                 )}
                 {state === 'ready' && (
                   <p className="instructions">
-                    Grave seus dados olhando os campos ao lado. Selecione o arquivo quando estiver
-                    pronto.
+                    Diga seus dados olhando os campos ao lado. Use o microfone ou selecione um
+                    arquivo de áudio.
                   </p>
                 )}
                 {issues.length > 0 && (
@@ -377,19 +592,33 @@ export default function App() {
                   </div>
                 )}
 
-                {(state === 'ready' || session.can_correct_audio) && (
+                {canUpload && (
                   <section className="audio-section" aria-labelledby="audio-title">
                     <h3 id="audio-title">
-                      {state === 'ready' ? 'Arquivo de áudio' : 'Corrigir campo por áudio'}
+                      {state === 'ready' ? 'Gravar ou enviar áudio' : 'Corrigir campo por áudio'}
                     </h3>
                     {state !== 'ready' && (
                       <p className="instructions" id="audio-correction-help">
-                        Envie uma gravação dizendo qual campo deseja corrigir e o novo valor. Ex.:
-                        “Corrija minha cidade para Quixadá”. Os outros campos são mantidos.
+                        Grave ou envie um áudio dizendo qual campo deseja corrigir e o novo valor.
+                        Ex.: “Corrija minha cidade para Quixadá”. Os outros campos são mantidos.
                       </p>
                     )}
+                    <AudioRecorder
+                      key={session.id}
+                      disabled={working}
+                      maxSeconds={maxSeconds}
+                      maxBytes={maxBytes}
+                      onRecorded={setFile}
+                      onBusyChange={setRecording}
+                      onError={setError}
+                    />
+                    <div className="audio-divider">ou envie um arquivo</div>
                     <form className="upload" onSubmit={upload}>
-                      <label className="file-picker" htmlFor="audio-file">
+                      <label
+                        className="file-picker"
+                        htmlFor="audio-file"
+                        aria-disabled={working || recording}
+                      >
                         <span className="upload-symbol" aria-hidden="true">
                           ↑
                         </span>
@@ -401,16 +630,16 @@ export default function App() {
                               : 'Selecionar áudio de correção'}
                         </strong>
                         <small>
-                          WAV, MP3, MP4, M4A ou FLAC · até {Math.round(maxBytes / 1024 / 1024)} MiB
-                          · {maxSeconds} segundos
+                          WAV, MP3, MP4, M4A, FLAC, WebM ou OGG · até{' '}
+                          {Math.round(maxBytes / 1024 / 1024)} MiB · {maxSeconds} segundos
                         </small>
                       </label>
                       <input
                         id="audio-file"
                         type="file"
-                        accept=".wav,.mp3,.mp4,.m4a,.flac"
+                        accept=".wav,.mp3,.mp4,.m4a,.flac,.webm,.ogg"
                         aria-describedby={state === 'ready' ? undefined : 'audio-correction-help'}
-                        disabled={working}
+                        disabled={working || recording}
                         onChange={(e) => {
                           setFile(e.target.files?.[0] ?? null)
                           e.target.value = ''
@@ -424,15 +653,26 @@ export default function App() {
                             <button
                               className="text-button"
                               type="button"
+                              disabled={working || recording}
                               onClick={() => setFile(null)}
                             >
                               Remover
                             </button>
                           </div>
-                          {audioUrl && <audio controls src={audioUrl} preload="metadata" />}
+                          {audioUrl && (
+                            <audio
+                              controls
+                              src={audioUrl}
+                              preload="metadata"
+                              aria-label="Prévia do áudio"
+                            />
+                          )}
                         </>
                       )}
-                      <button className="button primary full" disabled={!file || working}>
+                      <button
+                        className="button primary full"
+                        disabled={!file || working || recording}
+                      >
                         {working
                           ? 'Enviando…'
                           : state === 'ready'
@@ -474,9 +714,12 @@ export default function App() {
                             ? 'Digite a informação solicitada'
                             : 'Ex.: Corrija minha cidade para Quixadá'
                         }
-                        disabled={working}
+                        disabled={working || recording}
                       />
-                      <button className="button primary full" disabled={!text.trim() || working}>
+                      <button
+                        className="button primary full"
+                        disabled={!text.trim() || working || recording}
+                      >
                         Enviar mensagem
                       </button>
                     </form>
@@ -484,7 +727,7 @@ export default function App() {
                   {session.can_message && (
                     <button
                       className="text-button"
-                      disabled={working}
+                      disabled={working || recording}
                       onClick={() => void action('/review/skip')}
                     >
                       Descartar pedido pendente
@@ -509,13 +752,13 @@ export default function App() {
                 {session.can_complete && (
                   <button
                     className="button primary full finish"
-                    disabled={working}
+                    disabled={working || recording}
                     onClick={() => void action('/review/complete')}
                   >
                     Concluir revisão
                   </button>
                 )}
-                {state === 'review_complete' && (
+                {state === 'review_complete' && session.submission_supported && (
                   <div className="final-action">
                     <p>
                       Revise os valores antes de confirmar. Este formulário realiza um envio de
@@ -530,6 +773,11 @@ export default function App() {
                     </button>
                   </div>
                 )}
+                {state === 'review_complete' && !session.submission_supported && (
+                  <div className="pending">
+                    Revisão concluída. O envio automático não está habilitado para este endereço.
+                  </div>
+                )}
                 {state === 'sent' && (
                   <div className="success-banner" role="status">
                     Envio simulado confirmado. Encerre a sessão para liberar o servidor.
@@ -540,7 +788,7 @@ export default function App() {
           </aside>
         </div>
         <p className="scope-note">
-          V1 · formulário padrão · arquivos de áudio · alterações de um campo por pedido
+          Formulários HTML · microfone ou arquivo de áudio · alterações de um campo por pedido
         </p>
       </main>
       <dialog

@@ -45,6 +45,9 @@ class BrowserConfig:
     timeout_ms: float = 30_000
     executable_path: str | None = None
     submission_success_selector: str = '[data-form-agent-submitted="true"]'
+    form_selector: str | None = None
+    restrict_network: bool = False
+    allowed_hosts: tuple[str, ...] = ()
 
 
 def _positive_float(value: str, variable: str) -> float:
@@ -170,6 +173,15 @@ def load_browser_config(*, env_file: Path | None = DEFAULT_ENV_FILE) -> BrowserC
         executable_path=executable_path,
         submission_success_selector=os.getenv(
             "SUBMISSION_SUCCESS_SELECTOR", '[data-form-agent-submitted="true"]'
+        ),
+        form_selector=os.getenv("FORM_SELECTOR") or None,
+        restrict_network=parse_boolean(
+            os.getenv("BROWSER_RESTRICT_NETWORK", "false"), "BROWSER_RESTRICT_NETWORK"
+        ),
+        allowed_hosts=tuple(
+            host.strip()
+            for host in os.getenv("BROWSER_ALLOWED_HOSTS", "").split(",")
+            if host.strip()
         ),
     )
 

@@ -17,6 +17,7 @@ from form_agent.core.schemas import (
     ToolCall,
 )
 from form_agent.experiments import RunTrace
+from voice_form.clarification import ClarificationSession
 from voice_form.interaction import ReviewInput
 from voice_form.normalization import normalize_spoken_data
 from voice_form.review import ReviewSession
@@ -237,6 +238,64 @@ async def test_native_rejection_remains_pending_until_a_new_correction_is_verifi
     assert result.issues == ()
     assert [record.status for record in result.records] == ["pending", "applied"]
     assert any("phone: campo obrigatório vazio ou inválido" in text for text in notices)
+
+
+async def test_selected_required_radio_group_does_not_leave_unchecked_sibling_pending():
+    tools = Tools(
+        replace(field("online", "radio", True, required=True, valid=True), name="mode"),
+        replace(field("presencial", "radio", False, required=True, valid=True), name="mode"),
+    )
+    review, _, _ = session(tools, Model(), "CONCLUIR")
+    result = await review.run(initial(tools), ())
+    assert result.completed and result.issues == ()
+
+
+@pytest.mark.parametrize("value,required,valid", [("invalido", False, False), ("", True, True)])
+async def test_review_resolves_skipped_clarification_after_verified_correction(
+    value, required, valid
+):
+    tools = Tools(field("email", "email", value, required=required, valid=valid))
+
+    async def skip(_):
+        return "PULAR"
+
+    clarified = await ClarificationSession(skip, notify=lambda _: None).run(
+        tools, initial(tools), ()
+    )
+    assert clarified.issues[0].stage == "clarification"
+    review, _, _ = session(
+        tools,
+        Model([correction("email", "ana@example.com")]),
+        "Corrija meu e-mail para ana@example.com",
+        "CONCLUIR",
+    )
+    result = await review.run(clarified.form, clarified.issues)
+    assert result.completed and result.issues == ()
+    assert result.records[0].status == "applied"
+    assert result.form.final_inspection.fields[0].value == "ana@example.com"
+
+
+async def test_resolving_clarification_keeps_other_fields_pending():
+    tools = Tools(
+        field("email", "email", "", required=True),
+        field("backupEmail", "email", "", required=True),
+    )
+
+    async def skip(_):
+        return "PULAR"
+
+    clarified = await ClarificationSession(skip, notify=lambda _: None).run(
+        tools, initial(tools), ()
+    )
+    review, _, _ = session(
+        tools,
+        Model([correction("email", "ana@example.com")]),
+        "Corrija meu e-mail para ana@example.com",
+        "CONCLUIR",
+    )
+    result = await review.run(clarified.form, clarified.issues)
+    assert len(result.issues) == 1
+    assert result.issues[0].message.startswith("backupEmail:")
 
 
 @pytest.mark.parametrize("failure", ["side_effect", "timeout_after_write"])

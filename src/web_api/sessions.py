@@ -38,6 +38,8 @@ from voice_form.review import ReviewSession
 from voice_form.service import apply_review, submission_block
 
 from .config import WebConfig, asset
+from .extension import ExtensionToolsClient
+from .forms import FormTarget, resolve_target
 
 LOGGER = logging.getLogger(__name__)
 TERMINAL = {"closed", "expired"}
@@ -94,8 +96,21 @@ class SessionAudio(AudioAgent):
 
 
 class Session:
-    def __init__(self, manager: SessionManager, owner: str) -> None:
+    def __init__(
+        self,
+        manager: SessionManager,
+        owner: str,
+        target: FormTarget | None = None,
+        bridge: ExtensionToolsClient | None = None,
+    ) -> None:
         self.manager, self.owner = manager, owner
+        self.bridge = bridge
+        self.target = target or resolve_target()
+        self.settings = (
+            manager.config.settings
+            if self.target.browser.url == asset("form.html").as_uri()
+            else replace(manager.config.settings, initial_prompt=None, hotwords=None)
+        )
         self.id = uuid4().hex
         self.loop = asyncio.get_running_loop()
         self.directory = manager.config.data_dir / "uploads" / self.id
@@ -133,10 +148,14 @@ class Session:
         blocked = self.question or any(i["code"] != "SUBMISSION_BLOCKED" for i in self.issues)
         return {
             "id": self.id,
+            "transport": "extension" if self.bridge else "web",
             "state": self.state,
             "revision": self.revision,
             "sequence": self.sequence,
-            "form_name": "Cadastro — formulário padrão",
+            "form_name": self.target.name,
+            "form_url": self.target.public_url,
+            "is_demo": self.target.demo,
+            "submission_supported": self.target.demo,
             "fields": fields,
             "issues": [
                 {**i, "message": self.public_text(str(i.get("message", "")))} for i in self.issues
@@ -151,6 +170,7 @@ class Session:
             "can_correct_audio": self.waiting and self.phase == "review" and not self.closing,
             "can_complete": self.waiting and self.phase == "review" and not blocked,
             "can_submit": self.state == "review_complete"
+            and self.target.demo
             and not blocked
             and not self.denied
             and not self.submit_attempted,
@@ -191,7 +211,8 @@ class Session:
     def public_text(self, text: str) -> str:
         return (
             text.replace(str(self.directory), "[áudio enviado]")
-            .replace(str(asset("form.html")), "[formulário padrão]")
+            .replace(self.target.browser.url, self.target.public_url)
+            .replace(str(asset("form.html")), "[formulário de cadastro]")
             .replace(" ou digite PULAR ou ENCERRAR", " ou use os controles da sessão")
             .replace(
                 "Digite o número ou identificador, PULAR ou ENCERRAR: ",
@@ -302,32 +323,77 @@ class Session:
 
     async def open(self) -> None:
         try:
-            app = self.manager.factory(self.emit)
+            app = self.manager.factory(self.emit, self.target.browser)
             self.application = app
+            if self.bridge:
+                await app.client.close()
+                app.client = self.bridge
+                app.agent.tools = self.bridge
             app.agent.tools = GuardedTools(app.agent.tools, self)
             self.trace = RunTrace(
                 self.manager.config.data_dir / "runs",
                 {
                     **metadata(
                         model=app.config,
-                        browser=BrowserConfig(asset("form.html").as_uri()),
-                        stt_settings=self.manager.config.settings.to_dict(),
+                        browser=self.target.browser,
+                        stt_settings=self.settings.to_dict(),
                     ),
                     "entrypoint": "web-v1",
+                    "web_target": {
+                        "url": self.target.public_url,
+                        "name": self.target.name,
+                        "is_demo": self.target.demo,
+                    },
                 },
                 run_id=self.id,
                 data_directory=self.manager.config.data_dir / "sessions",
             )
-            self.snapshot(await app.agent.tools.inspect_form())
+            inventory = await app.agent.tools.inspect_form()
+            if not inventory.fields:
+                raise SessionError("Nenhum campo foi encontrado nesse formulário.")
+            if len({field.reference for field in inventory.fields}) != len(inventory.fields):
+                raise SessionError(
+                    "O formulário possui campos com referências repetidas. Use campos com identificadores únicos."
+                )
+            supported = {
+                "text",
+                "search",
+                "email",
+                "tel",
+                "date",
+                "number",
+                "url",
+                "textarea",
+                "select",
+                "checkbox",
+                "radio",
+                "time",
+                "datetime-local",
+                "month",
+                "week",
+            }
+            if any(
+                field.type not in supported and not field.disabled for field in inventory.fields
+            ):
+                raise SessionError(
+                    "Esse formulário contém controles ainda não suportados, como senha ou envio de arquivos. Use um formulário com campos HTML comuns."
+                )
+            self.snapshot(inventory)
             if self.closing:
                 return
             self.set_state("ready")
-            self.notify("Consulte os campos e envie um arquivo de áudio para preencher.")
-        except Exception:
+            self.notify(
+                "Consulte os campos e grave pelo microfone ou envie um arquivo de áudio para preencher."
+            )
+        except Exception as exc:
             LOGGER.exception("Falha ao abrir sessão %s", self.id)
             self.set_state("error")
             self.notify(
-                "Não foi possível preparar o formulário. Confira a configuração do servidor."
+                str(exc)
+                if isinstance(exc, SessionError)
+                else "Não foi possível ler a aba. Abra o painel da extensão e selecione um formulário HTML comum."
+                if self.bridge
+                else "Não foi possível preparar o formulário. Confira a URL e a configuração do servidor. Use uma página com um único formulário HTML, sem login ou redirecionamento."
             )
 
     async def fill(self, path: Path) -> None:
@@ -342,7 +408,7 @@ class Session:
                     self.ask_clarification, notify=self.notify, events=self.emit
                 ),
             )
-            result = await pipeline.run(path, self.manager.config.settings, data_treatment="rules")
+            result = await pipeline.run(path, self.settings, data_treatment="rules")
             self.result = result
             self.issues = [asdict(i) for i in result.issues]
             if self.closing:
@@ -362,7 +428,7 @@ class Session:
                 app.agent.tools,
                 app.model,
                 self.audio,
-                self.manager.config.settings,
+                self.settings,
                 ask=self.ask_review,
                 notify=self.notify,
                 events=self.emit,
@@ -381,7 +447,11 @@ class Session:
             if reviewed.completed:
                 self.question = ""
                 self.set_state("review_complete")
-                self.notify("Revisão concluída. O envio simulado exige sua confirmação separada.")
+                self.notify(
+                    "Revisão concluída. O envio simulado exige sua confirmação separada."
+                    if self.target.demo
+                    else "Revisão concluída. O envio automático não está habilitado para este endereço."
+                )
             else:
                 self.set_state("error")
                 self.notify("A revisão foi interrompida. O envio está bloqueado.")
@@ -415,7 +485,7 @@ class Session:
             )
             if output.get("submitted") is True:
                 self.set_state("sent")
-                self.notify("Envio simulado confirmado pelo formulário padrão.")
+                self.notify("Envio simulado confirmado pelo formulário.")
             else:
                 self.set_state("error")
                 self.notify("Envio não confirmado. A operação não será repetida automaticamente.")
@@ -447,7 +517,7 @@ class SessionManager:
         self,
         config: WebConfig,
         *,
-        factory: Callable[[EventSink], Application] | None = None,
+        factory: Callable[[EventSink, BrowserConfig], Application] | None = None,
         audio: AudioAgent | None = None,
     ) -> None:
         self.config = config
@@ -458,10 +528,10 @@ class SessionManager:
         self.reaper: asyncio.Task[None] | None = None
 
     @staticmethod
-    def _application(events: EventSink) -> Application:
+    def _application(events: EventSink, browser: BrowserConfig) -> Application:
         return create_application(
             events=events,
-            browser_config=BrowserConfig(asset("form.html").as_uri()),
+            browser_config=browser,
             model_config=load_model_config(
                 profiles_file=Path(
                     os.getenv("MODEL_PROFILES_FILE", str(asset("model-profiles.json")))
@@ -469,11 +539,17 @@ class SessionManager:
             ),
         )
 
-    def create(self, owner: str) -> Session:
+    def create(
+        self,
+        owner: str,
+        target: FormTarget | None = None,
+        *,
+        bridge: ExtensionToolsClient | None = None,
+    ) -> Session:
         active = sum(s.state not in TERMINAL for s in self.sessions.values())
         if active >= self.config.max_sessions:
             raise SessionError("Servidor ocupado. Aguarde o encerramento da sessão ativa.", 503)
-        session = Session(self, owner)
+        session = Session(self, owner, target, bridge)
         self.sessions[session.id] = session
         session.task = asyncio.create_task(session.open())
         return session
@@ -509,6 +585,8 @@ class SessionManager:
             return
         session.interrupted = session.state not in IDLE
         session.closing = True
+        if session.bridge:
+            session.bridge.abort()
         session.set_state("closing")
         session.waiting = False
         if session.inputs.empty():

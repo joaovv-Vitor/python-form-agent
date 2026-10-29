@@ -14,6 +14,9 @@ export type Session = {
   revision: number
   sequence: number
   form_name: string
+  form_url: string
+  is_demo: boolean
+  submission_supported: boolean
   fields: Field[]
   issues: { code: string; message: string }[]
   question: string
@@ -28,6 +31,8 @@ export type Session = {
   phase: string
   active_field: string
 }
+
+export type DemoForm = { id: string; name: string; description: string; url: string }
 
 export const labels: Record<string, string> = {
   preparing: 'Preparando formulário',
@@ -50,15 +55,33 @@ export const labels: Record<string, string> = {
 }
 
 export function acceptSnapshot(current: Session | null, next: Session): Session {
-  return current?.id === next.id && current.sequence > next.sequence ? current : next
+  if (
+    current?.id === next.id &&
+    (current.sequence > next.sequence ||
+      (['closed', 'expired'].includes(current.state) &&
+        !['closed', 'expired'].includes(next.state)))
+  ) {
+    return current
+  }
+  return next
+}
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
 }
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, { credentials: 'same-origin', ...options })
   const data = await response.json()
   if (!response.ok) {
-    throw new Error(
+    throw new ApiError(
       typeof data.detail === 'string' ? data.detail : 'Não foi possível concluir esta solicitação.',
+      response.status,
     )
   }
   return data as T

@@ -4,12 +4,21 @@ import json
 import unicodedata
 from collections.abc import Sequence
 
-from playwright.async_api import Browser, Locator, Page, Playwright, async_playwright
+from playwright.async_api import (
+    Browser,
+    Locator,
+    Page,
+    Playwright,
+    Route,
+    WebSocketRoute,
+    async_playwright,
+)
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from ..config import BrowserConfig, load_browser_config
 from ..core.errors import AmbiguousElementError, BrowserControllerError, ElementNotFoundError
 from ..core.schemas import FormButton, FormField, FormInspection, JsonObject
+from .url_policy import validate_network_url
 
 FIELD_INSPECTION_SCRIPT = r"""els => els.map(control => {
   const labels = control.labels
@@ -79,15 +88,50 @@ class BrowserController:
                 )
             else:
                 self.browser = await self.playwright.chromium.launch(headless=self.config.headless)
-            self.page = await self.browser.new_page()
+            if self.config.restrict_network:
+                await validate_network_url(self.config.url, self.config.allowed_hosts)
+                self.page = await self.browser.new_page(service_workers="block")
+                await self.page.context.route("**/*", self._guard_route)
+                await self.page.context.route_web_socket("**/*", self._block_websocket)
+            else:
+                self.page = await self.browser.new_page()
             self.page.set_default_timeout(self.config.timeout_ms)
-            await self.page.goto(self.config.url, wait_until="domcontentloaded")
+            response = await self.page.goto(self.config.url, wait_until="domcontentloaded")
+            if self.config.restrict_network and response is not None and response.status >= 400:
+                raise BrowserControllerError(
+                    "O servidor não disponibilizou o formulário solicitado."
+                )
             return self.page
         except Exception as exc:
             await self.close()
             raise BrowserControllerError(
                 f"Não foi possível abrir o formulário em {self.config.url}."
             ) from exc
+
+    async def _guard_route(self, route: Route) -> None:
+        try:
+            await validate_network_url(route.request.url, self.config.allowed_hosts)
+        except ValueError:
+            await route.abort("blockedbyclient")
+        else:
+            # Do not let a redirect bypass destination checks. The web UI asks
+            # for the final address of a form rather than following redirects.
+            response = await route.fetch(max_redirects=0, timeout=self.config.timeout_ms)
+            if 300 <= response.status < 400:
+                await route.abort("blockedbyclient")
+            else:
+                await route.fulfill(response=response)
+
+    async def _block_websocket(self, socket: WebSocketRoute) -> None:
+        await socket.close()
+
+    async def _scope(self, page: Page) -> Page | Locator:
+        if not self.config.form_selector:
+            return page
+        forms = page.locator(self.config.form_selector).filter(visible=True)
+        if await forms.count() != 1:
+            raise BrowserControllerError("Use uma página com um único formulário visível.")
+        return forms.first
 
     async def close(self) -> None:
         browser, playwright = self.browser, self.playwright
@@ -103,10 +147,11 @@ class BrowserController:
 
     async def inspect_form(self) -> FormInspection:
         page = await self.start()
-        raw_fields = await page.locator(
+        scope = await self._scope(page)
+        raw_fields = await scope.locator(
             'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):visible, select:visible, textarea:visible'
         ).evaluate_all(FIELD_INSPECTION_SCRIPT)
-        raw_buttons = await page.locator(
+        raw_buttons = await scope.locator(
             'button:visible, input[type="submit"]:visible, input[type="button"]:visible'
         ).evaluate_all(BUTTON_INSPECTION_SCRIPT)
         return FormInspection.from_mapping(
@@ -157,13 +202,14 @@ class BrowserController:
         if meta.disabled:
             raise BrowserControllerError(f"O campo está desabilitado: {meta.label}")
         page = await self.start()
-        locator = page.get_by_label(meta.label, exact=True).filter(visible=True)
+        scope = await self._scope(page)
+        locator = scope.get_by_label(meta.label, exact=True).filter(visible=True)
         if await locator.count() != 1 and meta.name:
-            locator = page.locator(f"[name={json.dumps(meta.name)}]").filter(visible=True)
+            locator = scope.locator(f"[name={json.dumps(meta.name)}]").filter(visible=True)
         if await locator.count() != 1 and meta.id:
-            locator = page.locator(f"[id={json.dumps(meta.id)}]").filter(visible=True)
+            locator = scope.locator(f"[id={json.dumps(meta.id)}]").filter(visible=True)
         if await locator.count() != 1 and meta.placeholder:
-            locator = page.get_by_placeholder(meta.placeholder, exact=True).filter(visible=True)
+            locator = scope.get_by_placeholder(meta.placeholder, exact=True).filter(visible=True)
         if await locator.count() != 1:
             raise AmbiguousElementError(f"Campo não localizado unicamente: {field}")
         return meta, locator
@@ -241,7 +287,8 @@ class BrowserController:
         if meta.disabled:
             raise BrowserControllerError(f"O botão está desabilitado: {meta.label}")
         page = await self.start()
-        locator = page.get_by_role("button", name=meta.label, exact=True)
+        scope = await self._scope(page)
+        locator = scope.get_by_role("button", name=meta.label, exact=True)
         if await locator.count() != 1:
             raise AmbiguousElementError(f"Botão não localizado unicamente: {button}")
         valid = await locator.evaluate(

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Suporte técnico — VozForm</title><link rel="stylesheet" href="forms.css"><script src="forms.js" defer></script></head>
+<body style="--accent:#237c65"><main>
+  <a href="/">← Voltar ao VozForm</a>
+  <p class="eyebrow">Formulário 04 · atendimento</p>
+  <h1>Abrir chamado de suporte</h1>
+  <p class="intro">Descreva o problema para organizar o atendimento. Os campos com * são obrigatórios.</p>
+  <form data-success-message="Chamado aberto (simulação).">
+    <div class="field"><label for="requester">Nome do solicitante</label><input id="requester" name="requester" required autocomplete="name"></div>
+    <div class="field"><label for="product">Produto com problema</label><select id="product" name="product" required><option value="">Selecione um produto</option><option value="notebook">Notebook</option><option value="celular">Celular</option><option value="impressora">Impressora</option></select></div>
+    <div class="field"><label for="problemCategory">Categoria do problema</label><select id="problemCategory" name="problemCategory" required><option value="">Selecione a categoria</option><option value="hardware">Hardware</option><option value="software">Software</option><option value="rede">Rede e conexão</option></select></div>
+    <div class="field"><label for="urgency">Prioridade do chamado</label><select id="urgency" name="urgency" required><option value="">Selecione a prioridade</option><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option></select></div>
+    <div class="field"><label for="problemDescription">Descrição do problema</label><textarea id="problemDescription" name="problemDescription" required></textarea></div>
+    <div class="field"><label for="incidentDate">Data em que o problema começou</label><input id="incidentDate" name="incidentDate" type="date"></div>
+    <div class="field"><label for="replyPhone">Telefone para retorno</label><input id="replyPhone" name="replyPhone" type="tel" autocomplete="tel"></div>
+    <button id="openTicket" type="submit">Abrir chamado</button><output hidden aria-live="polite"></output>
+  </form>
+  <p class="note">Página de demonstração. O chamado é simulado e não aciona um serviço de suporte real.</p>
+</main></body></html>

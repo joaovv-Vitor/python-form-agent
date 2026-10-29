@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "VozForm — formulários por voz",
+  "version": "0.1.1",
+  "minimum_chrome_version": "116",
+  "description": "Preencha e revise formulários da aba atual por voz com seu servidor VozForm local.",
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "action": { "default_title": "Abrir VozForm" },
+  "side_panel": { "default_path": "extension.html" },
+  "background": { "service_worker": "background.js" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:* http://localhost:*; frame-src 'none'; base-uri 'none'"
+  }
+}
