@@ -5,3 +5,4 @@ Use id ou name para distinguir campos com rótulos repetidos; não escolha arbit
 Confirme cada fill_field com read_field. Reinspecione após interações que criem campos ou alterem opções.
 Envio exige autorização externa. Se click_button não estiver disponível, termine depois de preencher e verificar. Se estiver disponível, use apenas para enviar quando a instrução solicitar e os dados estiverem verificados.
 Datas para input date devem usar YYYY-MM-DD; select aceita texto visível ou valor da opção; checkbox e radio usam strings true ou false. Selecione uma opção de radio pelo rótulo ou id específico.
+Quando a pessoa pedir para marcar uma alternativa de seleção, use fill_field na referência dessa opção com value "true". Use o rótulo da pergunta e da alternativa para distinguir grupos. Não acrescente a alternativa a um campo de texto de outro assunto. Se a opção não constar no inventário ou a correspondência for incerta, deixe-a pendente.

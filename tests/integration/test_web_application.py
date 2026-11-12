@@ -717,6 +717,162 @@ async def test_extension_document_guards_and_controls_without_ids(web_runtime, t
             await context.close()
 
 
+async def test_extension_clicks_aria_choices_and_verifies_the_selected_state(web_runtime, tmp_path):
+    _, url = web_runtime
+    extension = PROJECT_ROOT / "extension/dist"
+    if not (extension / "manifest.json").is_file():
+        pytest.skip("Execute npm run build:extension em frontend/ antes do teste da extensão.")
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            tmp_path / "chrome",
+            channel="chromium",
+            headless=True,
+            args=[f"--disable-extensions-except={extension}", f"--load-extension={extension}"],
+        )
+        try:
+            worker = (
+                context.service_workers[0]
+                if context.service_workers
+                else await context.wait_for_event("serviceworker")
+            )
+            target = await context.new_page()
+            await target.goto(f"{url}/external-form")
+            await target.set_content("""<form>
+                <label>Curso<input name="course" value="Engenharia de Software"></label>
+                <div role="radiogroup" aria-labelledby="class-title" aria-required="true">
+                    <h2 id="class-title">Turma</h2>
+                    <div role="radio" aria-label="Turma 01" aria-checked="false" tabindex="0"></div>
+                    <div role="radio" aria-labelledby="class-02" aria-checked="false" tabindex="0"><span id="class-02">Turma 02</span></div>
+                    <div role="radio" aria-label="Turma 03" aria-checked="false" aria-disabled="true" tabindex="0"></div>
+                    <input type="hidden" name="class-answer">
+                </div>
+                <div role="radiogroup" aria-label="Turma de laboratório">
+                    <button type="button" role="radio" aria-label="Turma 02" aria-checked="false"></button>
+                </div>
+                <div role="group" aria-label="Interesses">
+                    <div role="checkbox" aria-checked="false" tabindex="0"><span>Pesquisa</span></div>
+                    <div role="checkbox" aria-label="Extensão" aria-checked="mixed" tabindex="0"></div>
+                </div>
+                <div role="group" aria-disabled="true">
+                    <div role="checkbox" aria-label="Bloqueado" aria-checked="false" tabindex="0"></div>
+                </div>
+                <div role="checkbox" aria-label="Somente leitura" aria-readonly="true" aria-checked="false" tabindex="0"></div>
+                <div role="radio" aria-label="Sem resposta ao clique" aria-checked="false" tabindex="0"></div>
+                <label role="checkbox" aria-checked="false">Nativo<input type="checkbox" name="native"></label>
+                </form><script>
+                document.querySelectorAll('[role=radio],[role=checkbox]').forEach(option => {
+                    option.addEventListener('click', () => {
+                        if (option.getAttribute('aria-label') === 'Sem resposta ao clique') return;
+                        if (option.getAttribute('role') === 'radio') {
+                            option.closest('[role=radiogroup]').querySelectorAll('[role=radio]').forEach(
+                                sibling => sibling.setAttribute('aria-checked', String(sibling === option)));
+                        } else {
+                            option.setAttribute('aria-checked', String(option.getAttribute('aria-checked') !== 'true'));
+                        }
+                    });
+                });
+                </script>""")
+            tab_id = await worker.evaluate(
+                "async url => (await chrome.tabs.query({url}))[0].id", target.url
+            )
+            await worker.evaluate(
+                "async id => chrome.scripting.executeScript({target:{tabId:id},files:['content-script.js']})",
+                tab_id,
+            )
+
+            async def send(message):
+                return await worker.evaluate(
+                    "async ({id,message}) => chrome.tabs.sendMessage(id, {source:'vozform',...message})",
+                    {"id": tab_id, "message": message},
+                )
+
+            page = await send({"kind": "prepare"})
+            assert page["success"]
+            assert len(page["fields"]) == 11  # No hidden answer or duplicate native wrapper.
+            fields = {field["label"]: field for field in page["fields"]}
+            first, second = fields["Turma: Turma 01"], fields["Turma: Turma 02"]
+            assert first["name"] == second["name"]
+            assert second["name"] != fields["Turma de laboratório: Turma 02"]["name"]
+            assert second["type"] == "radio" and second["value"] is False
+            assert second["required"] and second["valid"] is False
+            assert fields["Interesses: Extensão"]["value"] is None
+            sequence = 0
+
+            async def command(name, arguments):
+                nonlocal sequence
+                sequence += 1
+                return await send(
+                    {
+                        "kind": "command",
+                        "command": {
+                            "id": str(sequence),
+                            "name": name,
+                            "arguments": arguments,
+                            "document_id": page["document_id"],
+                            "url": page["url"],
+                        },
+                    }
+                )
+
+            result = await command("fill_field", {"field": second["id"], "value": "true"})
+            assert result["success"] and result["value"] is True and result["valid"]
+            await expect(target.locator("[name=course]")).to_have_value("Engenharia de Software")
+            assert (await command("read_field", {"field": second["id"]}))["value"] is True
+            assert not (await command("fill_field", {"field": "Turma 02", "value": "true"}))[
+                "success"
+            ]
+            assert not (await command("fill_field", {"field": second["id"], "value": "false"}))[
+                "success"
+            ]
+            assert (await command("fill_field", {"field": first["id"], "value": "true"}))[
+                "value"
+            ] is True
+            assert (await command("read_field", {"field": second["id"]}))["value"] is False
+            assert (await command("read_field", {"field": second["id"]}))["valid"] is True
+            result = await command(
+                "fill_field",
+                {"field": fields["Turma de laboratório: Turma 02"]["id"], "value": "true"},
+            )
+            assert result["success"] and result["value"] is True
+            assert (await command("read_field", {"field": first["id"]}))["value"] is True
+            for label in ("Interesses: Pesquisa", "Interesses: Extensão"):
+                for value in ("true", "false"):
+                    result = await command(
+                        "fill_field", {"field": fields[label]["id"], "value": value}
+                    )
+                    assert result["success"] and result["value"] is (value == "true")
+            for label in ("Turma: Turma 03", "Bloqueado", "Somente leitura"):
+                result = await command(
+                    "fill_field", {"field": fields[label]["id"], "value": "true"}
+                )
+                assert not result["success"]
+                assert (await command("read_field", {"field": fields[label]["id"]}))[
+                    "value"
+                ] is False
+            result = await command(
+                "fill_field", {"field": "Sem resposta ao clique", "value": "true"}
+            )
+            assert not result["success"] and "não confirmou" in result["error"]
+            result = await command("fill_field", {"field": second["id"], "value": "Turma 02"})
+            assert not result["success"]
+            refreshed = await command("inspect_form", {})
+            assert [f["id"] for f in refreshed["fields"]] == [f["id"] for f in page["fields"]]
+            await target.locator('[aria-label="Sem resposta ao clique"]').evaluate(
+                "element => element.removeAttribute('aria-checked')"
+            )
+            assert not (await send({"kind": "prepare"}))["success"]
+            # An ARIA role must not turn submission/reset/navigation into a choice click.
+            for control in (
+                '<button role="radio" aria-checked="false">Enviar</button>',
+                '<button type="reset" role="checkbox" aria-checked="false">Limpar</button>',
+                '<a href="/next" role="radio" aria-checked="false">Próxima etapa</a>',
+            ):
+                await target.set_content(f"<form>{control}</form>")
+                assert not (await send({"kind": "prepare"}))["success"]
+        finally:
+            await context.close()
+
+
 async def test_expired_session_after_dropped_stream_can_restart_without_reload(web_runtime):
     manager, url = web_runtime
     async with async_playwright() as p:

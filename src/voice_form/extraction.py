@@ -36,6 +36,10 @@ Nesta PoC, a parte do usuário de e-mails usa ASCII sem acentos: joão vira joao
 Essa conversão exige @ ou a palavra arroba explícita na evidência. Não insira @
 quando só houver pontos e não corrija nem substitua o domínio por aproximação.
 Select usa o valor da opção existente. Para texto, preserve a grafia transcrita.
+Alternativas de radio/checkbox pertencem à pergunta indicada em seu rótulo.
+Quando a pessoa pedir para marcá-las, use a referência com booleano true; não
+concatene essa escolha ao valor de outro campo de texto. Se não houver uma
+alternativa correspondente no inventário, não transfira a escolha para outro campo.
 Resolva correções somente quando a pessoa indicar inequivocamente o valor final.
 Formato JSON obrigatório, sem outras chaves:
 {"fields": [{"field": "referência do inventário", "value": "valor ou booleano ou null",

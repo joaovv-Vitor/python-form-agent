@@ -20,7 +20,7 @@
     "radio",
   ]);
   const selector =
-    "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]),textarea,select";
+    "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]),textarea,select,[role=radio],[role=checkbox]";
   let documentId = "";
   let pageUrl = "";
   let selectedForm = null;
@@ -36,8 +36,41 @@
   const visible = (element) =>
     element.getClientRects().length > 0 &&
     getComputedStyle(element).visibility !== "hidden";
+  const native = (element) => element.matches("input,textarea,select");
   const typeOf = (element) =>
-    element.tagName === "INPUT" ? element.type : element.tagName.toLowerCase();
+    element.tagName === "INPUT"
+      ? element.type
+      : native(element)
+        ? element.tagName.toLowerCase()
+        : element.getAttribute("role");
+  const checked = (element) =>
+    native(element)
+      ? element.checked
+      : element.getAttribute("aria-checked") === "mixed"
+        ? null
+        : element.getAttribute("aria-checked") === "true";
+  const accessibleLabel = (element) =>
+    (element.getAttribute("aria-labelledby") || "")
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent?.trim())
+      .filter(Boolean)
+      .join(" ") ||
+    element.getAttribute("aria-label") ||
+    "";
+
+  function reference(element) {
+    if (!references.has(element)) {
+      const uniqueId =
+        element.id &&
+        document.querySelectorAll(`[id="${CSS.escape(element.id)}"]`).length ===
+          1;
+      references.set(
+        element,
+        uniqueId ? element.id : `vf-${documentId}-${++sequence}`,
+      );
+    }
+    return references.get(element);
+  }
 
   function scope() {
     if (location.href !== pageUrl || !selectedForm?.isConnected)
@@ -48,7 +81,13 @@
   }
 
   function controls() {
-    const elements = [...scope().querySelectorAll(selector)].filter(visible);
+    const elements = [...scope().querySelectorAll(selector)].filter(
+      (element) =>
+        visible(element) &&
+        // A custom wrapper around a visible native control is one field.
+        (native(element) ||
+          ![...element.querySelectorAll("input")].some(visible)),
+    );
     if (elements.length > 200)
       throw new Error("Este formulário excede o limite de 200 campos.");
     if (
@@ -61,37 +100,69 @@
         "Este formulário contém controles ainda não suportados, como senha ou envio de arquivos.",
       );
     }
+    if (
+      elements.some(
+        (element) =>
+          !native(element) &&
+          ((element.matches("button") && element.type !== "button") ||
+            element.matches("a[href]")),
+      )
+    )
+      throw new Error(
+        "Uma opção está associada a envio, limpeza ou navegação e não pode ser marcada pela extensão.",
+      );
+    if (
+      elements.some(
+        (element) =>
+          !native(element) &&
+          !["true", "false", "mixed"].includes(
+            element.getAttribute("aria-checked"),
+          ),
+      )
+    )
+      throw new Error(
+        "Uma opção não informa seu estado de seleção. Não foi possível inspecioná-la com segurança.",
+      );
     return elements.filter((element) => supported.has(typeOf(element)));
   }
 
   function metadata(element) {
-    if (!references.has(element)) {
-      const uniqueId =
-        element.id &&
-        document.querySelectorAll(`[id="${CSS.escape(element.id)}"]`).length ===
-          1;
-      references.set(
-        element,
-        uniqueId ? element.id : `vf-${documentId}-${++sequence}`,
-      );
-    }
     const type = typeOf(element);
-    const indirect = (element.getAttribute("aria-labelledby") || "")
-      .split(/\s+/)
-      .map((id) => document.getElementById(id)?.textContent?.trim())
-      .filter(Boolean)
-      .join(" ");
-    const label =
-      indirect ||
-      element.getAttribute("aria-label") ||
+    const group = !native(element)
+      ? element.closest(
+          type === "radio" ? '[role="radiogroup"]' : '[role="group"]',
+        )
+      : null;
+    const groupLabel = group ? accessibleLabel(group) : "";
+    const optionLabel =
+      accessibleLabel(element) ||
       element.labels?.[0]?.textContent?.trim() ||
+      (!native(element) ? element.textContent?.trim() : "") ||
       element.placeholder ||
       element.name ||
       element.id ||
       "Campo sem rótulo";
+    const label = groupLabel ? `${groupLabel}: ${optionLabel}` : optionLabel;
+    const required = Boolean(
+      element.required ||
+      element.getAttribute("aria-required") === "true" ||
+      group?.getAttribute("aria-required") === "true",
+    );
+    const selected = ["checkbox", "radio"].includes(type)
+      ? checked(element)
+      : element.value;
+    const customValid =
+      element.getAttribute("aria-invalid") === "true"
+        ? false
+        : !required ||
+          (type === "radio" && group
+            ? [...group.querySelectorAll('[role="radio"]')].some(
+                (option) => checked(option) === true,
+              )
+            : selected === true);
     return {
-      id: references.get(element),
-      name: element.name || null,
+      id: reference(element),
+      name: element.name || (group ? reference(group) : null),
       label,
       type,
       role:
@@ -101,13 +172,20 @@
             ? type
             : "textbox",
       placeholder: element.placeholder || null,
-      required: element.required,
-      disabled: element.matches(":disabled"),
-      readonly: Boolean(element.readOnly),
-      value: ["checkbox", "radio"].includes(type)
-        ? element.checked
-        : element.value,
-      valid: element.willValidate ? element.validity.valid : null,
+      required,
+      disabled: Boolean(
+        element.matches(":disabled") ||
+        element.closest('[aria-disabled="true"]'),
+      ),
+      readonly: Boolean(
+        element.readOnly || element.getAttribute("aria-readonly") === "true",
+      ),
+      value: selected,
+      valid: native(element)
+        ? element.willValidate
+          ? element.validity.valid
+          : null
+        : customValid,
       validation_message: element.validationMessage || "",
       ...(type === "select"
         ? {
@@ -170,6 +248,7 @@
 
   async function fill(query, value) {
     const { element, meta } = find(query);
+    let expectedChecked = null;
     if (meta.disabled || meta.readonly)
       throw new Error("Este campo está desabilitado ou é somente leitura.");
     if (meta.type === "select" && element.multiple)
@@ -180,7 +259,8 @@
       const wanted = normalized(value);
       if (!yes.has(wanted) && !no.has(wanted))
         throw new Error("Informe explicitamente se deseja marcar o campo.");
-      if (element.checked !== yes.has(wanted)) {
+      expectedChecked = yes.has(wanted);
+      if (checked(element) !== expectedChecked) {
         if (meta.type === "radio" && no.has(wanted))
           throw new Error(
             "Para trocar a opção, indique qual alternativa deseja marcar.",
@@ -217,7 +297,12 @@
       throw new Error(
         "A página mudou durante o preenchimento. Confira o campo e reconecte a aba.",
       );
-    return read(meta.id);
+    const result = read(meta.id);
+    if (expectedChecked !== null && result.value !== expectedChecked)
+      throw new Error(
+        "O clique não confirmou a seleção da opção. Confira o campo no site.",
+      );
+    return result;
   }
 
   async function execute(command) {

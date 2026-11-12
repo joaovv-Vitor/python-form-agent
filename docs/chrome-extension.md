@@ -55,7 +55,8 @@ e carregue novamente `extension/dist`, pois a identidade mudou uma vez para fica
 Isso não apaga os formulários nem a aplicação web. As próximas versões mantêm esse ID.
 
 Depois de recompilar a extensão, clique em **Atualizar** no cartão do VozForm em
-`chrome://extensions`. Abra novamente o painel e selecione o formulário.
+`chrome://extensions`. Recarregue também a aba do formulário para substituir o script
+de campos já carregado. Abra novamente o painel e selecione o formulário.
 
 Se o Chrome não liberar o acesso à aba, volte ao site do formulário e clique no
 ícone **VozForm na barra de extensões**. Abrir apenas o painel pelo seletor lateral
@@ -103,10 +104,16 @@ com as duas interfaces simultaneamente. O processamento de fala permanece serial
 - Campos nativos de texto, e-mail, telefone, URL, número, data/hora, textarea,
   select simples, checkbox e radio. Referências estáveis distinguem controles sem
   ID e opções radio com o mesmo nome.
+- Opções personalizadas com `role="radio"` ou `role="checkbox"` e estado
+  `aria-checked`, como as alternativas de múltipla escolha do Google Forms.
+  O inventário inclui o rótulo da pergunta quando disponível em um grupo ARIA,
+  distingue grupos e relê o estado depois do clique. Se o site não confirmar a
+  seleção, a operação informa erro.
 - Páginas autenticadas podem ser usadas quando o formulário já estiver acessível
   na aba escolhida; a extensão não executa login.
-- Iframes, campos customizados, seleção múltipla, senha, upload de arquivos e
-  navegação entre etapas não são cobertos. A extensão não resolve CAPTCHA.
+- Iframes, outros campos customizados (como listas suspensas), select com seleção
+  múltipla, senha, upload de arquivos e navegação entre etapas não são cobertos.
+  A extensão não resolve CAPTCHA.
 - A revisão confere se outros campos mudaram; mudanças automáticas do site ou
   edições manuais durante a revisão podem exigir reiniciar a sessão.
 
