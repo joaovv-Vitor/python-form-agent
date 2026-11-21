@@ -3,10 +3,15 @@
 .env.*
 .venv
 reports
+output
 samples
 evaluation/audio/audios
+evaluation/audio/references
+evaluation/audio/cases.csv
+evaluation/audio/failure-review.csv
 frontend/node_modules
 frontend/dist
+extension/dist
 **/__pycache__
 .pytest_cache
 .mypy_cache

@@ -56,8 +56,9 @@ não publique voz por estar em uma pasta `speaker_001`. O guia da ANPD trata das
 cuidados aplicáveis à pesquisa e aos fins acadêmicos; a finalidade acadêmica exige análise
 própria do tratamento. [Guia oficial da ANPD](https://www.gov.br/anpd/pt-br/centrais-de-conteudo/materiais-educativos-e-publicacoes/guia-orientativo-tratamento-de-dados-pessoais-para-fins-academicos-e-para-a-realizacao-de-estudos-e-pesquisas).
 
-Os áudios permanecem ignorados no Git; catálogos com dados fictícios e hashes podem ser
-versionados. Para uma versão reproduzível do corpus, arquive um pacote privado autorizado,
+Os áudios, o catálogo preenchido, os arquivos de referência e a revisão de falhas
+permanecem ignorados no Git. Os catálogos `*.example.csv` contêm dados fictícios
+para orientar novos testes. Para uma versão reproduzível do corpus, arquive um pacote privado autorizado,
 identificado por versão e hashes, e registre o procedimento de acesso. Um hash sozinho
 não substitui o arquivo. JSONL/CSV também contêm transcrição e valores de formulário e
 seguem os mesmos controles de acesso. Não colocar credenciais ou dados reais nesses artefatos.

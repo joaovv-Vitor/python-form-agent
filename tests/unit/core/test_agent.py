@@ -188,6 +188,24 @@ async def test_final_read_happens_after_latest_write_and_detects_failure():
     assert "VERIFICATION_ERROR" in [issue.code for issue in result.issues]
 
 
+async def test_final_read_preserves_technical_error_for_operational_metric():
+    from form_agent.core.errors import ToolClientError
+    from form_agent.evaluation.cases import EvaluationCase
+    from form_agent.evaluation.runner import score_form
+
+    class FailingRead(FakeTools):
+        async def call_tool(self, name, arguments=None):
+            if name == "read_field":
+                raise ToolClientError("Releitura interrompida", "TIMEOUT")
+            return await super().call_tool(name, arguments)
+
+    model = FakeModel([[ToolCall("1", "fill_field", {"field": "fullName", "value": "João"})], []])
+    result = await FormAgent(FailingRead(), model).run("Preencha João")
+    case = EvaluationCase("a", "Preencha João", {"fullName": "João"}, False, False)
+    assert any(issue.code == "TIMEOUT" and issue.stage == "verification" for issue in result.issues)
+    assert score_form(case, 1, result, 0).operational_failure
+
+
 async def test_successful_click_is_not_submission_evidence():
     tools = FakeTools()
     model = FakeModel([[ToolCall("1", "click_button", {"button": "Enviar"})]])

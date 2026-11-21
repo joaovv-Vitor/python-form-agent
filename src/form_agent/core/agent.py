@@ -287,6 +287,15 @@ class FormAgent:
             )
             if output.get("success") is not True or output.get("value") != previous.value:
                 verified = False
+                if output.get("success") is not True:
+                    issues.append(
+                        RunIssue(
+                            str(output.get("code") or "TOOL_ERROR"),
+                            "verification",
+                            str(output.get("error") or "Falha ao reler o campo"),
+                            "read_field",
+                        )
+                    )
                 issues.append(
                     RunIssue(
                         "VERIFICATION_ERROR",

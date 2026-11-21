@@ -42,15 +42,22 @@ playwright-report/
 *.tmp
 *.temp
 
-# Generated reports
+# Generated reports and local research artifacts
 reports/
+/output/
+/docs/Artefatos/diagrama arquitetura/
 
 # Local audio used in reproducible experiments
 samples/*
 !samples/.gitkeep
+evaluation/audio/cases.csv
+evaluation/audio/failure-review.csv
 evaluation/audio/audios/**
 !evaluation/audio/audios/**/
 !evaluation/audio/audios/**/.gitkeep
+evaluation/audio/references/**
+!evaluation/audio/references/**/
+!evaluation/audio/references/**/.gitkeep
 
 # Editors and operating systems
 .idea/

@@ -108,7 +108,9 @@ async def test_stt_mode_does_not_construct_llm_or_browser_and_reports_missing_au
     )
     assert summary["execution_success_rate"] == 0
     assert summary["transcribed_attempts"] == 0
-    assert "micro_wer" not in summary
+    assert summary["operational_failure_rate"] == 1
+    assert summary["operational_failures"] == 1
+    assert "wer" not in summary
     assert "STT_ERROR" in paths[0].read_text()
 
 
@@ -135,7 +137,7 @@ async def test_stt_report_records_transcription_settings(tmp_path, monkeypatch):
         hotwords="arroba ponto",
     )
 
-    _, paths = await evaluate_audio(
+    summary, paths = await evaluate_audio(
         path,
         settings,
         mode="stt",
@@ -150,6 +152,7 @@ async def test_stt_report_records_transcription_settings(tmp_path, monkeypatch):
     assert "stt_initial_prompt" in report
     assert "Vocabulário de cadastro" in report
     assert "arroba ponto" in report
+    assert summary["operational_failure_rate"] == 0
 
 
 def test_positive_wer_and_functional_success_are_separate():
@@ -177,8 +180,8 @@ def test_positive_wer_and_functional_success_are_separate():
         character_edits=1,
     )
     summary = summarize([row, replace(row, id="other", word_edits=0, reference_words=9, wer=0.0)])
-    assert summary["functional_success_rate"] == 1
-    assert summary["micro_wer"] == 0.1
+    assert summary["complete_success_rate"] == 1
+    assert summary["wer"] == 0.1
     assert summary["pipeline_wer_positive_form_success"] == 1
     assert summary["pipeline_wer_zero_form_success"] == 1
 

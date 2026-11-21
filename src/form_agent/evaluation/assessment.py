@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 from ..core.schemas import AgentResult, FormField, JsonObject
+from .comparison import COMPARISON_VERSION, ComparisonPolicy, compare_field
 
 
 @dataclass(frozen=True, slots=True)
 class FormAssessment:
     actual: JsonObject
     correct: int
-    exact: bool
+    matches: bool
     unexpected_changes: JsonObject
     state_complete: bool
     validation_correct: bool
+    presentation_differences: JsonObject = dataclass_field(default_factory=dict)
 
 
-def assess(expected: JsonObject, result: AgentResult) -> FormAssessment:
+def assess(
+    expected: JsonObject, result: AgentResult, *, policy: ComparisonPolicy = COMPARISON_VERSION
+) -> FormAssessment:
     if result.final_inspection is None:
         return FormAssessment({}, 0, False, {}, False, False)
     before = {field.reference: field for field in result.inspection.fields}
@@ -28,6 +33,7 @@ def assess(expected: JsonObject, result: AgentResult) -> FormAssessment:
         and len(after) == len(result.final_inspection.fields)
     )
     actual: JsonObject = {}
+    matched_fields: dict[str, FormField] = {}
     expected_refs: set[str] = set()
     valid = True
     for key in expected:
@@ -39,6 +45,7 @@ def assess(expected: JsonObject, result: AgentResult) -> FormAssessment:
         matches = [field for field in after.values() if key in {field.reference, field.label}]
         if len(matches) == 1:
             field = matches[0]
+            matched_fields[key] = field
             if field.value not in (None, "", False) or field.value == expected[key]:
                 actual[key] = field.value
             expected_refs.add(field.reference)
@@ -59,8 +66,15 @@ def assess(expected: JsonObject, result: AgentResult) -> FormAssessment:
         if reference not in expected_refs:
             # Conservatively count explicit extra writes even when later restored.
             extras[reference] = written.value
-    # Keep exact values for identity-bearing fields; no accent/case folding of names or emails.
-    correct = sum(key in actual and actual[key] == value for key, value in expected.items())
+    correct = 0
+    presentation: JsonObject = {}
+    for key, value in expected.items():
+        if key not in actual:
+            continue
+        comparison = compare_field(key, value, actual[key], matched_fields.get(key), policy=policy)
+        correct += comparison.matches
+        if comparison.matches and value != actual[key]:
+            presentation[key] = {"expected": value, "actual": actual[key], "rule": comparison.rule}
     return FormAssessment(
         actual,
         correct,
@@ -68,4 +82,5 @@ def assess(expected: JsonObject, result: AgentResult) -> FormAssessment:
         extras,
         complete,
         valid,
+        presentation,
     )

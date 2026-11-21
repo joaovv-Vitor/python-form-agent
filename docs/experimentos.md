@@ -159,9 +159,40 @@ a caracteres. WER pode exceder 1. Referência vazia produz WER/CER nulos; as con
 continuam registradas para estudar alucinação em silêncio. A definição de WER e a importância
 de declarar antecipadamente o protocolo de avaliação são discutidas no [NIST Evaluation Cookbook](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=150472).
 
-A agregação é micro: soma das edições / soma dos tamanhos de referências não vazias.
+### Métricas principais
+
+| Métrica | Identificador no código | Cálculo |
+| --- | --- | --- |
+| Taxa de acerto por campo | `field_accuracy_rate` | Soma dos campos corretos / soma dos campos esperados |
+| Taxa de sucesso completo | `complete_success_rate` | Execuções com sucesso funcional / total de execuções do modo avaliado |
+| WER | `wer` | Soma das edições de palavras / soma das palavras das referências não vazias |
+| Taxa de falhas operacionais | `operational_failure_rate` | Execuções interrompidas por falha técnica / total de execuções do modo avaliado |
+
+Os identificadores substituem `field_recall`, `functional_success_rate` e `micro_wer`,
+respectivamente; as fórmulas dessas três métricas foram preservadas. Relatórios históricos
+não são reescritos. O HTML destaca os nomes em português e mostra porcentagens; o resumo
+CSV usa as colunas `Métrica`, `Valor` e `Identificador`, com razões numéricas sem multiplicar
+por 100. Comparações mantêm o prefixo da condição, por exemplo `rules.complete_success_rate`.
+
+A classificação por tentativa fica em `operational_failure`; o resumo também informa
+`operational_failures`. São técnicas as interrupções registradas com `STT_ERROR`,
+`PROVIDER_ERROR`, `TOOL_ERROR`, `BROWSER_ERROR`, `TIMEOUT`, `INTERNAL_ERROR` ou
+`EXTRACTION_ERROR`. A classificação também cobre falhas técnicas que impedem a verificação
+final ou interrompem uma tentativa de envio. Erros recuperados e divergências de valores
+não são interrupções. `STT_EMPTY`, entrada inválida, dados pendentes, campo inexistente ou
+ambíguo, limite de turnos, validação e divergência na releitura, por si só, não entram no
+numerador operacional. Vários erros em uma tentativa contam apenas uma execução.
+
+Interrupções permanecem nos denominadores de sucesso completo e acerto por campo;
+tentativas interrompidas antes de obter o estado final têm zero campos corretos e preservam
+o total esperado. Avaliação apenas de STT tem taxa operacional, mas não calcula as duas
+taxas de formulário. Erros de configuração anteriores ao início das tentativas abortam
+o comando e não constituem uma rodada de avaliação.
+
+A agregação WER é micro: soma das edições / soma dos tamanhos de referências não vazias.
 Relatórios mostram número de tentativas transcritas, pontuadas e referências vazias. Falhas
-operacionais ficam fora do denominador WER, mas dentro do denominador de sucesso funcional C.
+sem transcrição ficam fora do denominador WER, mas dentro do denominador de sucesso completo C.
+Se a transcrição foi produzida antes de uma falha posterior, ela ainda é pontuada.
 Essa diferença precisa aparecer na redação dos resultados, para evitar viés de sobrevivência.
 
 RTF = tempo de processamento STT / duração do áudio, quando duração > 0. O tempo STT inclui
@@ -184,10 +215,21 @@ penalizadas conservadoramente, mesmo se posteriormente restauradas. Snapshots ca
 alterações finais indiretas em controles nativos visíveis; não observam cada mutação transitória
 nem dados internos/hidden/iframes. Esta é uma definição operacional, não uma prova sobre todo o DOM.
 
-A comparação funcional é exata e sensível a caixa/acentos/tipo: strings para inputs/select,
-booleanos para checkbox/radio. Esta decisão é mais rigorosa que o casefold da avaliação
-original e é uma mudança metodológica; não juntar os resultados antigos e novos sem reavaliar.
-O select pode receber a transcrição “Ceara” e produzir valor DOM `CE`, idêntico ao oráculo.
+A comparação funcional atual usa `field-aware-v1`, com regras determinísticas fixadas antes
+da rodada. Textos livres ignoram caixa, espaços extras e pontuação terminal (`.`, `!`, `?`).
+Nomes ignoram caixa/espaços, mas preservam palavras e acentos. E-mails preservam o nome local,
+aceitando apenas espaços externos e caixa do domínio. CPF, telefone e CEP comparam os mesmos
+dígitos, aceitando máscaras numéricas diferentes. Não são removidos DDD, código de país ou
+dígitos. Datas aceitam ISO, dia/mês/ano, dia-mês-ano e dia.mês.ano, validando o calendário.
+Opções de seleção preservam a opção escolhida; caixas exigem valores booleanos reais.
+Campos numéricos aceitam representações decimais equivalentes; “seis meses” não é interpretado
+automaticamente como `6`. Não há julgamento por LLM, substituição de nomes ou equivalência
+livre por sinônimos. Os valores DOM permanecem intactos e diferenças de apresentação aceitas
+ficam em `presentation_differences`, fora do total de erros de conteúdo.
+
+O campo `comparison_version` identifica o protocolo de cada tentativa. `exact-v1` permanece
+disponível na função de comparação para auditoria histórica; os relatórios anteriores não
+foram reescritos. Não juntar resultados exatos e tolerantes sem reavaliar os valores registrados.
 
 **Sucesso parcial:** precision/recall/F1 por pares campo–valor, preservando microagregação
 existente. Um valor incorreto contribui para previsão incorreta e valor esperado não encontrado;

@@ -26,6 +26,7 @@ from form_agent.evaluation.cases import (
     load_audio_cases,
     load_dataset_audio_cases,
 )
+from form_agent.evaluation.comparison import COMPARISON_VERSION
 from form_agent.evaluation.metrics import EvaluationRow, calculate
 from form_agent.evaluation.reporting import write_reports
 from form_agent.evaluation.runner import _run_attempt, failure_row, score_form
@@ -170,7 +171,13 @@ async def run_audio_attempt(
             # STT mode reports execution success. WER is a separate continuous outcome.
             row = failure_row(case, attempt, "STT_ERROR", "", 0, stage="stt")
             row = replace(
-                row, passed=True, error=None, error_codes=(), failure_stage=None, expected_count=0
+                row,
+                passed=True,
+                error=None,
+                error_codes=(),
+                failure_stage=None,
+                expected_count=0,
+                operational_failure=False,
             )
     except Exception as exc:
         code = (
@@ -235,6 +242,8 @@ def summarize(rows: Sequence[EvaluationRow]) -> dict[str, float | int]:
             "total_attempts": len(rows),
             "unique_cases": len({row.id for row in rows}),
             "execution_success_rate": sum(row.passed for row in rows) / len(rows),
+            "operational_failure_rate": sum(row.operational_failure for row in rows) / len(rows),
+            "operational_failures": sum(row.operational_failure for row in rows),
             "average_latency_ms": sum(row.latency_ms for row in rows) / len(rows),
             "p95_latency_ms": sorted(row.latency_ms for row in rows)[
                 max(0, (95 * len(rows) + 99) // 100 - 1)
@@ -248,7 +257,7 @@ def summarize(rows: Sequence[EvaluationRow]) -> dict[str, float | int]:
     summary["wer_scored_attempts"] = len(word_rows)
     summary["empty_reference_attempts"] = sum(row.reference_words == 0 for row in speech_rows)
     if word_rows:
-        summary["micro_wer"] = sum(row.word_edits or 0 for row in word_rows) / sum(
+        summary["wer"] = sum(row.word_edits or 0 for row in word_rows) / sum(
             row.reference_words or 0 for row in word_rows
         )
     if char_rows:
@@ -360,6 +369,7 @@ async def _evaluate_loaded_cases(
                         "case_id": case.id,
                         "attempt": attempt,
                         "allow_submission": allow_submission,
+                        "comparison_version": COMPARISON_VERSION,
                         "normalization_version": NORMALIZATION_VERSION,
                         "data_normalization_version": (
                             DATA_NORMALIZATION_VERSION

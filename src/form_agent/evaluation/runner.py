@@ -18,7 +18,8 @@ from ..core.schemas import AgentResult
 from ..experiments import RunTrace, metadata
 from .assessment import assess
 from .cases import EvaluationCase, load_cases
-from .metrics import EvaluationMetrics, EvaluationRow, calculate
+from .comparison import COMPARISON_VERSION
+from .metrics import OPERATIONAL_ERROR_CODES, EvaluationMetrics, EvaluationRow, calculate
 from .reporting import write_reports
 
 __all__ = ["calculate", "evaluate", "load_cases", "main", "write_reports"]
@@ -60,6 +61,7 @@ def failure_row(
         error_codes=(code,),
         failure_stage=stage,
         total_seconds=elapsed,
+        operational_failure=code in OPERATIONAL_ERROR_CODES,
     )
 
 
@@ -73,7 +75,7 @@ def score_form(
         else not result.submitted and not result.submission_attempted
     )
     unmatched_correct = result.unmatched == case.unmatched
-    functional_success = assessment.exact and submitted_correct and not result.turn_limit_reached
+    functional_success = assessment.matches and submitted_correct and not result.turn_limit_reached
     codes = list(dict.fromkeys(issue.code for issue in result.issues))
     if not assessment.state_complete and "VERIFICATION_ERROR" not in codes:
         codes.append("VERIFICATION_ERROR")
@@ -81,9 +83,24 @@ def score_form(
         codes.append("VALIDATION_ERROR")
     if not submitted_correct and not any(code.startswith("SUBMISSION_") for code in codes):
         codes.append("SUBMISSION_ERROR")
-    if not assessment.exact and not codes:
+    if not assessment.matches and not codes:
         # This is observed disagreement, not evidence of a semantic or STT root cause.
         codes.append("OUTCOME_MISMATCH")
+    # An unsuccessful outcome alone is not an operational interruption. A technical
+    # failure must prevent verification or stop an attempted submission.
+    operational_failure = not functional_success and any(
+        issue.code in OPERATIONAL_ERROR_CODES
+        and (
+            (issue.stage == "verification" and not assessment.state_complete)
+            or (
+                issue.stage == "tool"
+                and result.submission_attempted
+                and not result.submitted
+                and issue.tool == "click_button"
+            )
+        )
+        for issue in result.issues
+    )
     return EvaluationRow(
         id=case.id,
         attempt=attempt,
@@ -106,6 +123,8 @@ def score_form(
         submission_attempted=result.submission_attempted,
         submission_authorized=result.submission_authorized,
         submitted=result.submitted,
+        operational_failure=operational_failure,
+        presentation_differences=assessment.presentation_differences,
     )
 
 
@@ -163,6 +182,7 @@ async def evaluate(
                         "case_id": case.id,
                         "attempt": attempt,
                         "allow_submission": allow_submission,
+                        "comparison_version": COMPARISON_VERSION,
                     }
                 )
                 with RunTrace(

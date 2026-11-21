@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "form-agent-poc-python"
 version = "0.1.0"
-description = "PoC multiagente para transcrição de áudio e preenchimento seguro de formulários"
+description = "VozForm, uma prova de conceito de preenchimento de formulários web por voz"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

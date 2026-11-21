@@ -9,6 +9,19 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..core.schemas import JsonObject
+from .comparison import COMPARISON_VERSION
+
+OPERATIONAL_ERROR_CODES = frozenset(
+    {
+        "STT_ERROR",
+        "PROVIDER_ERROR",
+        "TOOL_ERROR",
+        "BROWSER_ERROR",
+        "TIMEOUT",
+        "INTERNAL_ERROR",
+        "EXTRACTION_ERROR",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +84,9 @@ class EvaluationRow:
     extraction_completion_tokens: int | None = None
     pending_fields: tuple[str, ...] = ()
     post_stt_seconds: float | None = None
+    operational_failure: bool = False
+    comparison_version: str = COMPARISON_VERSION
+    presentation_differences: JsonObject = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> EvaluationRow:
@@ -89,6 +105,11 @@ class EvaluationRow:
             latency_ms=int(value.get("latency_ms", 0)),
             error=str(value["error"]) if value.get("error") else None,
             functional_success=bool(value.get("functional_success", False)),
+            error_codes=tuple(value.get("error_codes", ())),
+            failure_stage=value.get("failure_stage"),
+            operational_failure=bool(value.get("operational_failure", False)),
+            comparison_version=str(value.get("comparison_version", "exact-v1")),
+            presentation_differences=dict(value.get("presentation_differences", {})),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -98,7 +119,7 @@ class EvaluationRow:
 @dataclass(frozen=True, slots=True)
 class EvaluationMetrics:
     field_precision: float
-    field_recall: float
+    field_accuracy_rate: float
     field_f1: float
     overall_pass_rate: float
     stable_case_rate: float
@@ -106,7 +127,9 @@ class EvaluationMetrics:
     p95_latency_ms: int
     unique_cases: int
     total_attempts: int
-    functional_success_rate: float = 0.0
+    complete_success_rate: float = 0.0
+    operational_failure_rate: float = 0.0
+    operational_failures: int = 0
 
     def to_dict(self) -> dict[str, float | int]:
         return asdict(self)
@@ -130,7 +153,7 @@ def calculate(rows: Sequence[EvaluationRow | Mapping[str, Any]]) -> EvaluationMe
     stable = sum(all(row.passed for row in normalized if row.id == case_id) for case_id in case_ids)
     return EvaluationMetrics(
         field_precision=precision,
-        field_recall=recall,
+        field_accuracy_rate=recall,
         field_f1=2 * precision * recall / (precision + recall) if precision + recall else 0.0,
         overall_pass_rate=sum(row.passed for row in normalized) / len(normalized),
         stable_case_rate=stable / len(case_ids),
@@ -138,5 +161,8 @@ def calculate(rows: Sequence[EvaluationRow | Mapping[str, Any]]) -> EvaluationMe
         p95_latency_ms=latencies[p95_index],
         unique_cases=len(case_ids),
         total_attempts=len(normalized),
-        functional_success_rate=sum(row.functional_success for row in normalized) / len(normalized),
+        complete_success_rate=sum(row.functional_success for row in normalized) / len(normalized),
+        operational_failure_rate=sum(row.operational_failure for row in normalized)
+        / len(normalized),
+        operational_failures=sum(row.operational_failure for row in normalized),
     )

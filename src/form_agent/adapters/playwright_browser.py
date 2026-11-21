@@ -12,12 +12,14 @@ from playwright.async_api import (
     Route,
     WebSocketRoute,
     async_playwright,
+    expect,
 )
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from ..config import BrowserConfig, load_browser_config
 from ..core.errors import AmbiguousElementError, BrowserControllerError, ElementNotFoundError
 from ..core.schemas import FormButton, FormField, FormInspection, JsonObject
+from . import google_forms
 from .url_policy import validate_network_url
 
 FIELD_INSPECTION_SCRIPT = r"""els => els.map(control => {
@@ -97,6 +99,11 @@ class BrowserController:
                 self.page = await self.browser.new_page()
             self.page.set_default_timeout(self.config.timeout_ms)
             response = await self.page.goto(self.config.url, wait_until="domcontentloaded")
+            if google_forms.is_google_form(self.page.url):
+                await self.page.wait_for_function(
+                    """() => [...document.querySelectorAll('input:not([type="hidden"]),textarea')]
+                    .some(el => !el.disabled && el.getAttribute('aria-disabled') !== 'true')"""
+                )
             if self.config.restrict_network and response is not None and response.status >= 400:
                 raise BrowserControllerError(
                     "O servidor não disponibilizou o formulário solicitado."
@@ -151,6 +158,8 @@ class BrowserController:
         raw_fields = await scope.locator(
             'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):visible, select:visible, textarea:visible'
         ).evaluate_all(FIELD_INSPECTION_SCRIPT)
+        if google_forms.is_google_form(page.url):
+            raw_fields = await google_forms.inspect_fields(scope)
         raw_buttons = await scope.locator(
             'button:visible, input[type="submit"]:visible, input[type="button"]:visible'
         ).evaluate_all(BUTTON_INSPECTION_SCRIPT)
@@ -203,6 +212,11 @@ class BrowserController:
             raise BrowserControllerError(f"O campo está desabilitado: {meta.label}")
         page = await self.start()
         scope = await self._scope(page)
+        if google_forms.is_google_form(page.url):
+            locator = google_forms.field_locator(scope, meta)
+            if await locator.count() != 1:
+                raise AmbiguousElementError(f"Campo não localizado unicamente: {field}")
+            return meta, locator
         locator = scope.get_by_label(meta.label, exact=True).filter(visible=True)
         if await locator.count() != 1 and meta.name:
             locator = scope.locator(f"[name={json.dumps(meta.name)}]").filter(visible=True)
@@ -233,7 +247,12 @@ class BrowserController:
             }:
                 raise ValueError("Checkbox/radio requer valor booleano explícito")
             checked = normalize(value) in ("true", "sim", "yes", "1", "aceito", "marcar")
-            await locator.set_checked(checked)
+            if google_forms.is_google_form((await self.start()).url):
+                if (await locator.get_attribute("aria-checked") == "true") != checked:
+                    await locator.click()
+                await expect(locator).to_have_attribute("aria-checked", str(checked).lower())
+            else:
+                await locator.set_checked(checked)
         elif meta.type == "select":
             wanted = normalize(value)
             option = next(
@@ -246,18 +265,41 @@ class BrowserController:
             )
             if option is None:
                 raise ElementNotFoundError(f"Opção não encontrada em {meta.label}: {value}")
-            await locator.select_option(value=option.value)
+            if meta.role in {"radiogroup", "listbox"}:
+                if meta.role == "listbox":
+                    await locator.click()
+                role = "radio" if meta.role == "radiogroup" else "option"
+                await (
+                    locator.locator(
+                        f"[role={json.dumps(role)}][data-value={json.dumps(option.value, ensure_ascii=False)}]"
+                    )
+                    .filter(visible=True)
+                    .click()
+                )
+                if meta.role == "listbox":
+                    await expect(locator).to_have_attribute("aria-expanded", "false")
+                else:
+                    await expect(
+                        locator.locator(
+                            f'[role="radio"][data-value={json.dumps(option.value, ensure_ascii=False)}]'
+                        )
+                    ).to_have_attribute("aria-checked", "true")
+            else:
+                await locator.select_option(value=option.value)
         else:
             await locator.fill(value)
         return await self.read_field(meta.reference)
 
     async def read_field(self, field: str) -> JsonObject:
         meta, locator = await self._field(field)
-        value = (
-            await locator.is_checked()
-            if meta.type in ("checkbox", "radio")
-            else await locator.input_value()
-        )
+        if google_forms.is_google_form((await self.start()).url):
+            value = meta.value
+        else:
+            value = (
+                await locator.is_checked()
+                if meta.type in ("checkbox", "radio")
+                else await locator.input_value()
+            )
         return {
             "success": True,
             "field": meta.label,

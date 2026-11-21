@@ -170,5 +170,5 @@ async def test_failures_do_not_fall_back_or_contaminate_other_conditions(
     else:
         assert calls["stt"] == 1
         assert len(calls["apps"]) == 3
-        assert summary["rules.functional_success_rate"] == 1
+        assert summary["rules.complete_success_rate"] == 1
     assert summary["deepseek.overall_pass_rate"] == 0
