@@ -96,3 +96,7 @@ Para os testes de integração, compile a aplicação web, instale Chromium e us
 para os pré-requisitos e a integração opcional com Whisper.
 
 Mais detalhes no [índice de documentação](docs/README.md).
+
+## Licença
+
+O código da VozForm é distribuído sob a [licença MIT](LICENSE).

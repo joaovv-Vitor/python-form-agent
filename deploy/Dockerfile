@@ -14,7 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
     WEB_HOST=0.0.0.0 \
     WEB_FRONTEND_DIR=/app/frontend/dist
 WORKDIR /app
-COPY pyproject.toml README.md model-profiles.json ./
+COPY pyproject.toml README.md LICENSE model-profiles.json ./
 COPY src/ ./src/
 RUN python -m pip install '.[audio,web]' \
     && python -m playwright install --with-deps chromium \
